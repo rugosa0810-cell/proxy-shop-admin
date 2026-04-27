@@ -1,4 +1,9 @@
 import { useState, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 // ─── 代購連線管理系統 ── 業者後台 ────────────────────────────────
 const APP_NAME = "Muulie Studio";
@@ -378,6 +383,44 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       clearTimeout(warnTimer); clearTimeout(logoutTimer);
       events.forEach(e => window.removeEventListener(e, reset));
     };
+  });
+
+  // ── 從 Supabase 載入資料 + 即時訂閱 ─────────────────────────
+  useState(() => {
+    Promise.all([
+      supabase.from("orders").select("*").order("created_at", { ascending: false }),
+      supabase.from("products").select("*").order("created_at", { ascending: false }),
+      supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
+      supabase.from("announcements").select("*").order("created_at", { ascending: false }),
+      supabase.from("wishlist").select("*").order("created_at", { ascending: false }),
+    ]).then(([o, p, s, a, w]) => {
+      setData(d => ({
+        ...d,
+        orders:        o.data || [],
+        products:      p.data || [],
+        inStock:       s.data || [],
+        announcements: a.data || [],
+        wishlist:      w.data || [],
+      }));
+    }).catch(err => console.error("Supabase 載入失敗", err));
+
+    // 即時訂閱新訂單
+    const sub = supabase
+      .channel("admin-orders")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, payload => {
+        setData(d => ({ ...d, orders: [payload.new, ...d.orders] }));
+        showToast(`🔔 新訂單！${payload.new.customer_name} #${payload.new.no}`);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, payload => {
+        setData(d => ({ ...d, orders: d.orders.map(o => o.id === payload.new.id ? payload.new : o) }));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "wishlist" }, payload => {
+        setData(d => ({ ...d, wishlist: [payload.new, ...d.wishlist] }));
+        showToast(`⭐ ${payload.new.customer_name} 許願了「${payload.new.name}」`);
+      })
+      .subscribe();
+
+    return () => sub.unsubscribe();
   });
 
   const totalOrders = data.orders.length;
