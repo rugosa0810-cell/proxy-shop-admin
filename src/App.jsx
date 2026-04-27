@@ -1,34 +1,35 @@
-import { useState, useCallback, useEffect } from "react";
-import {
-  isConfigured,
-  fetchOrders, fetchProducts, fetchInStock, fetchAnnouncements, fetchWishlist, fetchMembers, fetchSettings,
-  createOrder,
-  updateOrderStatus, updateOrderItems, deleteOrder,
-  upsertProduct, deleteProduct,
-  upsertInStock, deleteInStock,
-  upsertAnnouncement, deleteAnnouncement,
-  updateWishStatus,
-  updateSetting,
-  subscribeToOrders, subscribeToWishlist,
-} from './supabase.js';
+import { useState, useCallback } from "react";
 
 // ─── 代購連線管理系統 ── 業者後台 ────────────────────────────────
-const APP_NAME = "代購連線管理系統";
+const APP_NAME = "Muulie Studio";
+const LOGO_SRC = "data:image/png;base64,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";
 
+// ─── 奶茶色系 Korean Milk Tea ────────────────────────────────────
 const C = {
-  bg: "#faf6f1", bgDeep: "#f3ede4", surface: "#fffdf9",
-  border: "#e8ddd0", borderSoft: "#ede5d8",
-  text: "#3a2e24", textMid: "#7a6555", muted: "#b0998a", faint: "#d5c8ba",
-  accent: "#b5836a", accentDark: "#8f5f47", accentLight: "#d4a98a", accentBg: "#f5ece3",
-  green: "#5a9e72", greenBg: "#edf5f0", greenDark: "#3d7a54",
-  yellow: "#c49a3c", yellowBg: "#fdf6e3",
-  red: "#c06060", redBg: "#fdf0f0",
-  blue: "#6a8caf", blueBg: "#eef3f9",
-  purple: "#9b7fb6", purpleBg: "#f5f0f9",
-  orange: "#d4894a", orangeBg: "#fdf3eb",
-  shadow: "0 2px 16px rgba(90,60,30,0.08)",
-  shadowMd: "0 4px 28px rgba(90,60,30,0.12)",
-  shadowLg: "0 8px 40px rgba(90,60,30,0.16)",
+  bg:        "#faf6f1",
+  bgDeep:    "#f3ede4",
+  bgDark:    "#2c1f14",
+  surface:   "#fffdf9",
+  border:    "#e8ddd0",
+  borderSoft:"#ede5d8",
+  text:      "#3a2e24",
+  textMid:   "#7a6555",
+  muted:     "#b0998a",
+  faint:     "#d5c8ba",
+  accent:    "#b5836a",
+  accentDark:"#8f5f47",
+  accentLight:"#d4a98a",
+  accentBg:  "#f5ece3",
+  green:     "#5a9e72",  greenBg:  "#edf5f0", greenDark:"#3d7a54",
+  yellow:    "#c49a3c",  yellowBg: "#fdf6e3",
+  red:       "#c06060",  redBg:    "#fdf0f0",
+  blue:      "#6a8caf",  blueBg:   "#eef3f9",
+  purple:    "#9b7fb6",  purpleBg: "#f5f0f9",
+  orange:    "#d4894a",  orangeBg: "#fdf3eb",
+  teal:      "#4a9e9e",  tealBg:   "#edf5f5",
+  shadow:    "0 2px 16px rgba(90,60,30,0.08)",
+  shadowMd:  "0 4px 28px rgba(90,60,30,0.12)",
+  shadowLg:  "0 8px 40px rgba(90,60,30,0.16)",
 };
 
 const ORDER_STATUS = {
@@ -96,6 +97,7 @@ const injectStyles = () => {
     .pill{display:inline-flex;align-items:center;gap:4px;padding:3px 11px;border-radius:99px;font-size:12px;font-weight:700}
     .row-hover:hover{background:${C.bgDeep}!important}
     @keyframes shakeX{0%,100%{transform:none}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+    @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
   `;
   document.head.appendChild(s);
 };
@@ -142,7 +144,7 @@ const Modal = ({ title, onClose, children, wide }) => (
     <div className="fade" style={{ background: C.surface, border: `1.5px solid ${C.border}`, borderRadius: 22, boxShadow: C.shadowLg, width: "100%", maxWidth: wide ? 680 : 480, maxHeight: "92vh", overflow: "auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 0" }}>
         <h3 style={{ fontSize: 18, fontWeight: 700, fontFamily: "'DM Serif Display',serif", color: C.accentDark }}>{title}</h3>
-        <button onClick={onClose} style={{ background: C.bgDeep, border: "none", color: C.muted, width: 30, height: 30, borderRadius: "50%", fontSize: 18 }}>×</button>
+        <button onClick={onClose} style={{ background: C.bgDeep, border: "none", color: C.muted, width: 30, height: 30, borderRadius: "50%", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
       </div>
       <div style={{ padding: 24 }}>{children}</div>
     </div>
@@ -258,16 +260,11 @@ function LoginPage({ credentials, onSuccess }) {
   const [lockInfo, setLockInfo] = useState({ locked: false, remaining: 0, attemptsLeft: 5 });
   const [loading, setLoading] = useState(false);
 
-  // Countdown timer for lockout display
   useState(() => {
     const interval = setInterval(() => {
       const s = loginLimiter.check();
-      if (s.locked) {
-        setLockInfo({ locked: true, remaining: s.remaining, attemptsLeft: 0 });
-      } else if (lockInfo.locked) {
-        setLockInfo(prev => ({ ...prev, locked: false }));
-        setError("");
-      }
+      if (s.locked) { setLockInfo({ locked: true, remaining: s.remaining, attemptsLeft: 0 }); }
+      else if (lockInfo.locked) { setLockInfo(prev => ({ ...prev, locked: false })); setError(""); }
     }, 1000);
     return () => clearInterval(interval);
   });
@@ -275,125 +272,72 @@ function LoginPage({ credentials, onSuccess }) {
   const login = async () => {
     if (loading) return;
     const check = loginLimiter.check();
-    if (check.locked) {
-      setError(`帳號已鎖定，請等待 ${check.remaining} 秒後再試`);
-      return;
-    }
-
+    if (check.locked) { setError(`帳號已鎖定，請等待 ${check.remaining} 秒後再試`); return; }
     const cleanAccount = sanitize(account);
     if (!cleanAccount || !password) { setError("請填寫帳號與密碼"); return; }
-
     setLoading(true);
-
-    // Simulate async hash comparison (real app would call backend)
-    await new Promise(r => setTimeout(r, 400 + Math.random() * 200)); // timing randomization
-
+    await new Promise(r => setTimeout(r, 400 + Math.random() * 200));
     const pwHash = await hashPassword(password);
     const expectedHash = await hashPassword(credentials.password);
-    const accountMatch = cleanAccount === credentials.account;
-    const passwordMatch = pwHash === expectedHash;
-
-    if (accountMatch && passwordMatch) {
-      loginLimiter.succeed();
-      logAction("登入成功", `帳號：${cleanAccount}`);
-      setLoading(false);
-      onSuccess();
+    if (cleanAccount === credentials.account && pwHash === expectedHash) {
+      loginLimiter.succeed(); logAction("登入成功", `帳號：${cleanAccount}`);
+      setLoading(false); onSuccess();
     } else {
-      const result = loginLimiter.fail();
-      logAction("登入失敗", `帳號嘗試：${cleanAccount}`);
+      const result = loginLimiter.fail(); logAction("登入失敗", `帳號嘗試：${cleanAccount}`);
       setShake(true); setTimeout(() => setShake(false), 500);
-      if (result.locked) {
-        setError(`嘗試次數過多，帳號已鎖定 5 分鐘`);
-        setLockInfo({ locked: true, remaining: 300, attemptsLeft: 0 });
-      } else {
-        setError(`帳號或密碼錯誤（剩餘 ${result.attemptsLeft} 次機會）`);
-        setLockInfo(prev => ({ ...prev, attemptsLeft: result.attemptsLeft }));
-      }
+      if (result.locked) { setError("嘗試次數過多，帳號已鎖定 5 分鐘"); setLockInfo({ locked: true, remaining: 300, attemptsLeft: 0 }); }
+      else { setError(`帳號或密碼錯誤（剩餘 ${result.attemptsLeft} 次機會）`); setLockInfo(prev => ({ ...prev, attemptsLeft: result.attemptsLeft })); }
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "fixed", top: -80, right: -80, width: 260, height: 260, borderRadius: "50%", background: `${C.accentLight}25`, pointerEvents: "none" }} />
-      <div style={{ position: "fixed", bottom: -60, left: -60, width: 200, height: 200, borderRadius: "50%", background: `${C.yellow}15`, pointerEvents: "none" }} />
+    <div style={{ minHeight:"100vh", background:C.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:20, position:"relative", overflow:"hidden" }}>
+      <div style={{ position:"fixed", top:-80, right:-80, width:260, height:260, borderRadius:"50%", background:`${C.accentLight}25`, pointerEvents:"none" }} />
+      <div style={{ position:"fixed", bottom:-60, left:-60, width:200, height:200, borderRadius:"50%", background:`${C.yellow}15`, pointerEvents:"none" }} />
 
-      <div className="fade" style={{ width: "100%", maxWidth: 400, background: C.surface, border: `1.5px solid ${C.border}`, borderRadius: 24, boxShadow: C.shadowLg, overflow: "hidden", animation: shake ? "shakeX .4s ease" : undefined }}>
-        <div style={{ background: `linear-gradient(135deg, ${C.accentDark}, ${C.accent})`, padding: "36px 28px 30px", textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 10, userSelect: "none" }}>👑</div>
-          <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 22, color: "#fff", fontWeight: 700 }}>{APP_NAME}</div>
-          <div style={{ color: "rgba(255,255,255,.75)", fontSize: 13, marginTop: 6 }}>業者管理後台</div>
+      <div className="fade" style={{ width:"100%", maxWidth:400, background:C.surface, border:`1.5px solid ${C.border}`, borderRadius:24, boxShadow:C.shadowLg, overflow:"hidden", animation:shake?"shakeX .4s ease":undefined }}>
+        <div style={{ background:`linear-gradient(135deg, ${C.accentDark}, ${C.accent})`, padding:"32px 28px 28px", textAlign:"center" }}>
+          <img src={LOGO_SRC} alt="Muulie Studio" style={{ width:90, height:90, objectFit:"contain", marginBottom:10, filter:"brightness(0) invert(1)", opacity:.92 }} />
+          <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:22, color:"#fff", fontWeight:700 }}>{APP_NAME}</div>
+          <div style={{ color:"rgba(255,255,255,.75)", fontSize:13, marginTop:4 }}>業者管理後台</div>
         </div>
-
-        <div style={{ padding: "28px 28px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* Lockout warning bar */}
+        <div style={{ padding:"28px 28px 24px", display:"flex", flexDirection:"column", gap:16 }}>
           {lockInfo.locked && (
-            <div style={{ background: "#fff0f0", border: `1.5px solid ${C.red}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ fontSize: 22 }}>🔒</div>
+            <div style={{ background:"#fff0f0", border:`1.5px solid ${C.red}`, borderRadius:12, padding:"14px 16px", display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ fontSize:22 }}>🔒</div>
               <div>
-                <div style={{ fontWeight: 700, color: C.red, fontSize: 14 }}>帳號暫時鎖定</div>
-                <div style={{ fontSize: 13, color: C.red, marginTop: 2 }}>
-                  {lockInfo.remaining > 0 ? `請等待 ${lockInfo.remaining} 秒後再試` : "正在計算…"}
-                </div>
+                <div style={{ fontWeight:700, color:C.red, fontSize:14 }}>帳號暫時鎖定</div>
+                <div style={{ fontSize:13, color:C.red, marginTop:2 }}>{lockInfo.remaining > 0 ? `請等待 ${lockInfo.remaining} 秒後再試` : "正在計算…"}</div>
               </div>
             </div>
           )}
-
-          {/* Attempt counter */}
           {!lockInfo.locked && lockInfo.attemptsLeft < 5 && lockInfo.attemptsLeft > 0 && (
-            <div style={{ background: C.yellowBg, border: `1.5px solid ${C.yellow}30`, borderRadius: 10, padding: "10px 14px", fontSize: 13, color: C.yellow, fontWeight: 600 }}>
+            <div style={{ background:C.yellowBg, border:`1.5px solid ${C.yellow}30`, borderRadius:10, padding:"10px 14px", fontSize:13, color:C.yellow, fontWeight:600 }}>
               ⚠️ 剩餘 {lockInfo.attemptsLeft} 次登入機會
             </div>
           )}
-
           <Input label="帳號" value={account} onChange={v => { setAccount(sanitize(v)); setError(""); }} placeholder="輸入管理員帳號" />
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase" }}>密碼</label>
-            <div style={{ position: "relative" }}>
-              <input
-                type={showPw ? "text" : "password"}
-                value={password}
+          <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+            <label style={{ fontSize:12, color:C.muted, fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>密碼</label>
+            <div style={{ position:"relative" }}>
+              <input type={showPw?"text":"password"} value={password}
                 onChange={e => { setPassword(e.target.value); setError(""); }}
-                onKeyDown={e => e.key === "Enter" && !lockInfo.locked && login()}
-                placeholder="輸入密碼"
-                disabled={lockInfo.locked || loading}
-                maxLength={128}
-                autoComplete="current-password"
-                style={{ width: "100%", background: lockInfo.locked ? C.bgDeep : C.bg, border: `1.5px solid ${error ? C.red : C.border}`, borderRadius: 10, padding: "9px 40px 9px 13px", color: C.text, fontSize: 14, cursor: lockInfo.locked ? "not-allowed" : "text" }}
-                onFocus={e => { if (!error) { e.target.style.borderColor = C.accent; e.target.style.boxShadow = `0 0 0 3px ${C.accent}15`; } }}
-                onBlur={e => { e.target.style.borderColor = error ? C.red : C.border; e.target.style.boxShadow = "none"; }}
+                onKeyDown={e => e.key==="Enter" && !lockInfo.locked && login()}
+                placeholder="輸入密碼" disabled={lockInfo.locked||loading} maxLength={128} autoComplete="current-password"
+                style={{ width:"100%", background:lockInfo.locked?C.bgDeep:C.bg, border:`1.5px solid ${error?C.red:C.border}`, borderRadius:10, padding:"9px 40px 9px 13px", color:C.text, fontSize:14, cursor:lockInfo.locked?"not-allowed":"text" }}
+                onFocus={e => { if (!error) { e.target.style.borderColor=C.accent; e.target.style.boxShadow=`0 0 0 3px ${C.accent}15`; } }}
+                onBlur={e => { e.target.style.borderColor=error?C.red:C.border; e.target.style.boxShadow="none"; }}
               />
-              <button onClick={() => setShowPw(p => !p)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: C.muted, fontSize: 16, cursor: "pointer" }}>{showPw ? "🙈" : "👁"}</button>
+              <button onClick={()=>setShowPw(p=>!p)} style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:C.muted, fontSize:16, cursor:"pointer" }}>{showPw?"🙈":"👁"}</button>
             </div>
           </div>
-
-          {error && <div style={{ background: C.redBg, border: `1.5px solid ${C.red}30`, borderRadius: 10, padding: "10px 14px", fontSize: 13, color: C.red, fontWeight: 600 }}>⚠️ {error}</div>}
-
-          <Btn
-            onClick={login}
-            disabled={lockInfo.locked || loading}
-            style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 4 }}
-          >
-            {loading
-              ? <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span> 驗證中…</>
-              : lockInfo.locked ? "🔒 已鎖定" : "登入後台"}
+          {error && <div style={{ background:C.redBg, border:`1.5px solid ${C.red}30`, borderRadius:10, padding:"10px 14px", fontSize:13, color:C.red, fontWeight:600 }}>⚠️ {error}</div>}
+          <Btn onClick={login} disabled={lockInfo.locked||loading} style={{ width:"100%", display:"flex", justifyContent:"center", alignItems:"center", gap:8, marginTop:4 }}>
+            {loading ? <><span style={{ animation:"spin 1s linear infinite", display:"inline-block" }}>⟳</span> 驗證中…</> : lockInfo.locked ? "🔒 已鎖定" : "登入後台"}
           </Btn>
-
-          {/* Security notice */}
-          <div style={{ fontSize: 11, color: C.muted, textAlign: "center", lineHeight: 1.6, marginTop: 4, padding: "10px 0 0", borderTop: `1px solid ${C.border}` }}>
-            🛡️ 連續錯誤 5 次將鎖定 5 分鐘<br/>
-            登入後 30 分鐘無操作將自動登出
-          </div>
-
-          {/* Default credentials hint */}
-          <div style={{ background: C.yellowBg, border: `1.5px solid ${C.yellow}40`, borderRadius: 10, padding: "12px 16px", textAlign: "center" }}>
-            <div style={{ fontSize: 12, color: C.yellow, fontWeight: 700, marginBottom: 6 }}>預設帳號資訊</div>
-            <div style={{ fontSize: 13, color: C.textMid, display: "flex", justifyContent: "center", gap: 20 }}>
-              <span>帳號：<strong>admin</strong></span>
-              <span>密碼：<strong>1234</strong></span>
-            </div>
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>登入後請至「帳號設定」修改密碼</div>
+          <div style={{ fontSize:11, color:C.muted, textAlign:"center", lineHeight:1.6, marginTop:4, padding:"10px 0 0", borderTop:`1px solid ${C.border}` }}>
+            🛡️ 連續錯誤 5 次將鎖定 5 分鐘<br/>登入後 30 分鐘無操作將自動登出
           </div>
         </div>
       </div>
@@ -402,63 +346,10 @@ function LoginPage({ credentials, onSuccess }) {
 }
 
 // ─── Admin Dashboard ──────────────────────────────────────────────
-// Normalize Supabase order row to admin's expected format
-const normOrder = o => ({
-  ...o,
-  customerId:   o.customer_line_id || o.customerId || "",
-  customerName: o.customer_name    || o.customerName || "",
-  createdAt:    (o.created_at || o.createdAt || "").split("T")[0],
-});
-
 function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }) {
   const [tab, setTab] = useState("orders");
   const [toast, setToast] = useState(null);
   const showToast = useCallback(msg => setToast(msg), []);
-
-  // ── 載入 Supabase 資料 ───────────────────────────────────────
-  useEffect(() => {
-    if (!isConfigured) return; // 使用展示資料
-    async function load() {
-      try {
-        const [orders, products, inStock, announcements, wishlist, members, settings] = await Promise.all([
-          fetchOrders(), fetchProducts(), fetchInStock(),
-          fetchAnnouncements(), fetchWishlist(), fetchMembers(), fetchSettings(),
-        ]);
-        const customers = (members||[]).map(m => ({
-          id: m.line_user_id, name: m.name||"", phone: m.phone||"",
-          address: "", level: "白銀",
-        }));
-        setData(d => ({
-          ...d,
-          rate: Number(settings?.value || d.rate),
-          orders: orders.map(normOrder),
-          products, inStock, announcements, wishlist, customers,
-        }));
-      } catch(e) { console.error("後台載入失敗:", e); }
-    }
-    load();
-
-    // 即時訂閱新訂單
-    const orderSub = subscribeToOrders(payload => {
-      if (payload.eventType === "INSERT") {
-        setData(d => ({ ...d, orders: [normOrder(payload.new), ...d.orders] }));
-        setToast("🔔 收到新訂單！");
-      }
-      if (payload.eventType === "UPDATE") {
-        setData(d => ({ ...d, orders: d.orders.map(o => o.id === payload.new.id ? normOrder(payload.new) : o) }));
-      }
-      if (payload.eventType === "DELETE") {
-        setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== payload.old.id) }));
-      }
-    });
-    const wishSub = subscribeToWishlist(payload => {
-      if (payload.eventType === "INSERT") {
-        setData(d => ({ ...d, wishlist: [payload.new, ...d.wishlist] }));
-        setToast("⭐ 新許願！");
-      }
-    });
-    return () => { orderSub.unsubscribe(); wishSub.unsubscribe(); };
-  }, []);
 
   // ── Session timeout ──────────────────────────────────────────
   const [sessionWarning, setSessionWarning] = useState(false);
@@ -492,7 +383,14 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
   const totalOrders = data.orders.length;
   const pendingBuy  = data.orders.filter(o => o.status === "pending").length;
   const bought      = data.orders.filter(o => o.status === "bought").length;
-  const profit      = data.orders.filter(o => o.status !== "cancelled").reduce((s, o) => s + o.profit, 0);
+  const profit      = data.orders.filter(o => o.status !== "cancelled").reduce((s, o) => s + (o.profit||0), 0);
+
+  // ── 統計卡片點擊篩選 ─────────────────────────────────────────
+  const [orderFilter, setOrderFilter] = useState("all");
+  const goFilter = (status) => {
+    setOrderFilter(status);
+    setTab("orders");
+  };
 
   const TABS = [
     { id: "orders",        label: "訂單管理" },
@@ -518,9 +416,9 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       )}
 
       {/* Top bar */}
-      <div style={{ background: C.surface, borderBottom: `1.5px solid ${C.border}`, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: sessionWarning ? 45 : 0, zIndex: 50 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: C.yellowBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>👑</div>
+      <div style={{ background: C.surface, borderBottom: `1.5px solid ${C.border}`, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: sessionWarning ? 45 : 0, zIndex: 50 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <img src={LOGO_SRC} alt="logo" style={{ width:38, height:38, objectFit:"contain" }} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 15, color: C.accentDark, fontFamily: "'DM Serif Display',serif" }}>{APP_NAME}</div>
             <div style={{ fontSize: 11, color: C.muted }}>登入：{credentials.account}</div>
@@ -534,32 +432,49 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {TABS.map(t => <button key={t.id} className={`tab-btn${tab === t.id ? " active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>)}
       </div>
 
-      {/* Stats */}
+      {/* Stats — 點擊可篩選訂單 */}
       <div style={{ padding: "16px 16px 8px", display: "flex", gap: 10 }}>
         {[
-          { icon: "📋", val: totalOrders, label: "總訂單" },
-          { icon: "⏳", val: pendingBuy,  label: "待購買",  color: C.orange },
-          { icon: "✅", val: bought,      label: "已買到",  color: C.green  },
-          { icon: "💰", val: `$${profit}`, label: "預估利潤", color: C.accent },
-        ].map((s, i) => (
-          <div key={i} style={{ flex: 1, background: C.surface, border: `1.5px solid ${C.border}`, borderRadius: 14, padding: "12px 10px", textAlign: "center", boxShadow: C.shadow }}>
-            <div style={{ fontSize: 18 }}>{s.icon}</div>
-            <div style={{ fontWeight: 700, fontSize: 18, color: s.color || C.text, fontFamily: "'DM Serif Display',serif" }}>{s.val}</div>
-            <div style={{ fontSize: 11, color: C.muted }}>{s.label}</div>
-          </div>
-        ))}
+          { icon: "📋", val: totalOrders,  label: "總訂單",   filter: "all",     color: C.text   },
+          { icon: "⏳", val: pendingBuy,   label: "待購買",   filter: "pending", color: C.orange },
+          { icon: "✅", val: bought,       label: "已買到",   filter: "bought",  color: C.green  },
+          { icon: "💰", val: `NT$${profit.toLocaleString()}`, label: "預估利潤", filter: null, color: C.accent },
+        ].map((s, i) => {
+          const isActive = s.filter && tab === "orders" && orderFilter === s.filter;
+          return (
+            <div key={i}
+              onClick={() => s.filter && goFilter(s.filter)}
+              style={{
+                flex: 1, background: isActive ? C.accentBg : C.surface,
+                border: `1.5px solid ${isActive ? C.accent : C.border}`,
+                borderRadius: 14, padding: "12px 8px", textAlign: "center",
+                boxShadow: isActive ? C.shadowMd : C.shadow,
+                cursor: s.filter ? "pointer" : "default",
+                transition: "all .18s",
+                transform: isActive ? "translateY(-2px)" : "none",
+              }}
+              onMouseEnter={e => { if(s.filter) e.currentTarget.style.boxShadow = C.shadowMd; }}
+              onMouseLeave={e => { if(s.filter) e.currentTarget.style.boxShadow = isActive ? C.shadowMd : C.shadow; }}
+            >
+              <div style={{ fontSize: 18 }}>{s.icon}</div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: s.color, fontFamily: "'DM Serif Display',serif", marginTop: 2 }}>{s.val}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{s.label}</div>
+              {s.filter && <div style={{ fontSize: 9, color: isActive ? C.accent : C.faint, marginTop: 3, fontWeight: 600 }}>{isActive ? "▲ 篩選中" : "點擊篩選"}</div>}
+            </div>
+          );
+        })}
       </div>
 
       {/* Page content */}
       <div style={{ padding: "8px 16px 60px" }}>
-        {tab === "orders"        && <OrdersPage        data={data} setData={setData} toast={showToast} />}
+        {tab === "orders"        && <OrdersPage        data={data} setData={setData} toast={showToast} initialFilter={orderFilter} onFilterChange={setOrderFilter} />}
         {tab === "review"        && <ReviewPage        data={data} setData={setData} toast={showToast} />}
         {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} />}
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "announcements" && <AnnouncementsPage data={data} setData={setData} toast={showToast} />}
         {tab === "rate"          && <RatePage          data={data} setData={setData} toast={showToast} />}
-        {tab === "customers"     && <CustomersPage     data={data} />}
+        {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
         {tab === "auditlog"      && <AuditLogPage />}
       </div>
@@ -570,43 +485,74 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
 }
 
 // ─── Pages ───────────────────────────────────────────────────────
-function OrdersPage({ data, setData, toast }) {
-  const [filter, setFilter] = useState("all");
+function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChange }) {
+  const [filter, setFilter] = useState(initialFilter);
   const [showAdd, setShowAdd] = useState(false);
   const STATUS_KEYS = ["all","pending_review","pending","bought","shipped","arrived","cancelled"];
   const filtered = data.orders.filter(o => filter === "all" || o.status === filter);
 
-  const updateStatus = async (id, status) => {
+  // 同步外部篩選（統計卡片點擊）
+  useState(() => { setFilter(initialFilter); }, [initialFilter]);
+
+  const changeFilter = (s) => {
+    setFilter(s);
+    if (onFilterChange) onFilterChange(s);
+  };
+
+  const updateStatus = (id, status) => {
     const safeS = safeStatus(status);
     const o = data.orders.find(x => x.id === id);
     setData(d => ({ ...d, orders: d.orders.map(o => o.id === id ? { ...o, status: safeS } : o) }));
     logAction("更新訂單狀態", `#${o?.no} → ${ORDER_STATUS[safeS]?.label}`);
-    if (isConfigured) { try { await updateOrderStatus(id, safeS); } catch(e) { toast("⚠️ 狀態同步失敗"); } }
     toast("狀態已更新");
   };
-  const del = async (id) => {
-    if (!window.confirm("確定刪除？")) return;
-    setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) }));
-    if (isConfigured) { try { await deleteOrder(id); } catch(e) { toast("⚠️ 刪除同步失敗"); } }
-    toast("已刪除");
-  };
+  const del = (id) => { if (!window.confirm("確定刪除？")) return; setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) })); toast("已刪除"); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>訂單管理</div>
+        <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>
+          訂單管理
+          {filter !== "all" && (
+            <span style={{ marginLeft:8, fontSize:12, color:C.accent, fontWeight:600 }}>
+              — {ORDER_STATUS[filter]?.label}（{filtered.length} 筆）
+            </span>
+          )}
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Btn sm variant="success" onClick={() => { exportCSV(data.orders); toast("CSV 已匯出 📊"); }}>📊 匯出 CSV</Btn>
           <Btn sm onClick={() => setShowAdd(true)}>＋ 新增訂單</Btn>
         </div>
       </div>
+
+      {/* 篩選按鈕列 */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {STATUS_KEYS.map(s => (
-          <button key={s} onClick={() => setFilter(s)} style={{ padding: "5px 12px", borderRadius: 99, border: `1.5px solid ${filter===s?C.accent:C.border}`, background: filter===s?C.accentBg:"transparent", color: filter===s?C.accentDark:C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-            {s === "all" ? "全部" : ORDER_STATUS[s]?.label}
-          </button>
-        ))}
+        {STATUS_KEYS.map(s => {
+          const count = s === "all" ? data.orders.length : data.orders.filter(o => o.status === s).length;
+          const isActive = filter === s;
+          return (
+            <button key={s} onClick={() => changeFilter(s)} style={{
+              padding: "6px 14px", borderRadius: 99,
+              border: `1.5px solid ${isActive ? C.accent : C.border}`,
+              background: isActive ? C.accentBg : "transparent",
+              color: isActive ? C.accentDark : C.muted,
+              fontSize: 12, fontWeight: 600, cursor: "pointer",
+              transition: "all .15s",
+            }}>
+              {s === "all" ? "全部" : ORDER_STATUS[s]?.label}
+              <span style={{ marginLeft:5, fontSize:11, opacity:.7 }}>({count})</span>
+            </button>
+          );
+        })}
       </div>
+
+      {filtered.length === 0 && (
+        <Card style={{ textAlign:"center", padding:32, color:C.muted }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
+          <div>此狀態沒有訂單</div>
+          <Btn sm variant="ghost" style={{ marginTop:12 }} onClick={() => changeFilter("all")}>顯示全部</Btn>
+        </Card>
+      )}
       {filtered.map(o => (
         <div key={o.id} style={{ background: C.surface, borderRadius: 16, border: `1.5px solid ${C.border}`, overflow: "hidden", boxShadow: C.shadow }}>
           <div style={{ padding: "13px 14px" }}>
@@ -626,15 +572,17 @@ function OrdersPage({ data, setData, toast }) {
           </div>
           <div style={{ background: C.bgDeep, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 13 }}>
-              <span style={{ color: C.muted }}>成本 {fmtMoney(o.items.reduce((s,it)=>s+it.cost*it.qty,0))}</span>
+              <span style={{ color: C.muted }}>成本 {fmtMoney(o.items.reduce((s,it)=>s+(it.cost||0)*it.qty,0))}</span>
               <span style={{ margin: "0 8px", color: C.faint }}>·</span>
               <span>售 {fmtMoney(o.total)}</span>
               <span style={{ margin: "0 8px", color: C.faint }}>·</span>
-              <span style={{ color: C.green, fontWeight: 700 }}>↑ {fmtMoney(o.profit)}</span>
+              <span style={{ color: C.green, fontWeight: 700 }}>↑ {fmtMoney(o.profit||0)}</span>
             </div>
             <button onClick={() => del(o.id)} style={{ background: C.redBg, border: "none", color: C.red, width: 30, height: 30, borderRadius: 8, fontSize: 15, cursor: "pointer" }}>🗑</button>
           </div>
-          <div style={{ padding: "4px 14px 10px", fontSize: 11, color: C.muted }}>更新：{o.createdAt}</div>
+          <div style={{ padding: "4px 14px 10px", fontSize: 11, color: C.muted }}>
+            {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : o.createdAt}
+          </div>
         </div>
       ))}
       {showAdd && <AddOrderModal data={data} setData={setData} onClose={() => setShowAdd(false)} toast={toast} />}
@@ -645,7 +593,7 @@ function OrdersPage({ data, setData, toast }) {
 function AddOrderModal({ data, setData, onClose, toast }) {
   const [customerId, setCustomerId] = useState(data.customers[0]?.id || "");
   const [name, setName] = useState(""); const [cost, setCost] = useState(""); const [price, setPrice] = useState(""); const [qty, setQty] = useState("1"); const [note, setNote] = useState("");
-  const save = async () => {
+  const save = () => {
     const cleanName = sanitize(name);
     const cleanNote = sanitize(note);
     if (!cleanName || !price) return alert("請填寫商品名稱和售價");
@@ -654,25 +602,18 @@ function AddOrderModal({ data, setData, onClose, toast }) {
     const qtyNum = Math.max(1, Math.min(999, Number(qty) || 1));
     const c = data.customers.find(x => x.id === customerId);
     if (!c) return alert("請選擇有效客人");
-    const newId = secureUid();
-    const newNo = String(Math.floor(Math.random() * 9000) + 1000);
-    const items = [{ name: cleanName, cost: costNum, price: priceNum, qty: qtyNum, note: cleanNote }];
     const o = {
-      id: newId, no: newNo,
-      customer_line_id: customerId, customer_name: sanitize(c.name),
-      customerId, customerName: sanitize(c.name),
-      status: "pending", items,
-      total: priceNum * qtyNum, profit: (priceNum - costNum) * qtyNum,
+      id: secureUid(),
+      no: String(Math.floor(Math.random() * 9000) + 1000),
+      customerId,
+      customerName: sanitize(c.name),
+      status: "pending",
+      items: [{ name: cleanName, cost: costNum, price: priceNum, qty: qtyNum, note: cleanNote }],
+      total: priceNum * qtyNum,
+      profit: (priceNum - costNum) * qtyNum,
       createdAt: today(),
     };
-    if (isConfigured) {
-      try {
-        const saved = await createOrder({ id: newId, no: newNo, customer_line_id: customerId, customer_name: sanitize(c.name), status: "pending", items, total: priceNum * qtyNum, profit: (priceNum - costNum) * qtyNum });
-        setData(d => ({ ...d, orders: [normOrder(saved), ...d.orders] }));
-      } catch(e) { toast("⚠️ 新增失敗"); return; }
-    } else {
-      setData(d => ({ ...d, orders: [o, ...d.orders] }));
-    }
+    setData(d => ({ ...d, orders: [o, ...d.orders] }));
     logAction("新增訂單", `${c.name} · ${cleanName}`);
     toast("訂單已新增 ✨"); onClose();
   };
@@ -737,28 +678,11 @@ function CatalogPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null); // product being edited
 
-  const toggle = async id => {
-    const p = data.products.find(x => x.id === id);
-    const next = { ...p, status: p.status === "on" ? "off" : "on" };
-    setData(d => ({ ...d, products: d.products.map(x => x.id===id ? next : x) }));
-    if (isConfigured) { try { await upsertProduct(next); } catch(e) { toast("⚠️ 同步失敗"); } }
-  };
-  const del = async id => {
-    if (!window.confirm("確定刪除？")) return;
-    setData(d => ({ ...d, products: d.products.filter(p=>p.id!==id) }));
-    if (isConfigured) { try { await deleteProduct(id); } catch(e) { toast("⚠️ 刪除同步失敗"); } }
-    toast("已刪除");
-  };
-  const saveNew = async (prod) => {
-    setData(d => ({ ...d, products: [prod, ...d.products] }));
-    if (isConfigured) { try { await upsertProduct(prod); } catch(e) { toast("⚠️ 新增同步失敗"); } }
-    toast("商品已新增"); setShowAdd(false);
-  };
-  const saveEdit = async (prod) => {
-    setData(d => ({ ...d, products: d.products.map(p => p.id===prod.id ? prod : p) }));
-    if (isConfigured) { try { await upsertProduct(prod); } catch(e) { toast("⚠️ 儲存同步失敗"); } }
-    toast("已儲存"); setEditing(null);
-  };
+  const toggle = id => { setData(d => ({ ...d, products: d.products.map(p => p.id===id?{...p,status:p.status==="on"?"off":"on"}:p) })); };
+  const del = id => { if (!window.confirm("確定刪除？")) return; setData(d => ({ ...d, products: d.products.filter(p=>p.id!==id) })); toast("已刪除"); };
+
+  const saveNew = (prod) => { setData(d => ({ ...d, products: [prod, ...d.products] })); toast("商品已新增"); setShowAdd(false); };
+  const saveEdit = (prod) => { setData(d => ({ ...d, products: d.products.map(p => p.id===prod.id?prod:p) })); toast("已儲存"); setEditing(null); };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -770,10 +694,14 @@ function CatalogPage({ data, setData, toast }) {
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
         {data.products.map(p => (
           <div key={p.id} style={{ background:C.surface, border:`1.5px solid ${C.border}`, overflow:"hidden", boxShadow:C.shadow }}>
-            <div style={{ background:C.bgDeep, padding:"24px 16px 12px", textAlign:"center", position:"relative" }}>
+            <div style={{ background:C.bgDeep, padding:"16px 16px 12px", textAlign:"center", position:"relative", minHeight:90, display:"flex", alignItems:"center", justifyContent:"center" }}>
               {p.status==="on" && <span className="pill" style={{ position:"absolute", top:8, left:8, background:C.greenBg, color:C.green, fontSize:11 }}>販售中</span>}
               {p.status==="off"&& <span className="pill" style={{ position:"absolute", top:8, left:8, background:C.redBg,  color:C.red,   fontSize:11 }}>已下架</span>}
-              <div style={{ fontSize:28 }}>{p.image || "🛒"}</div>
+              {p.image && p.image.startsWith("data:") ? (
+                <img src={p.image} alt={p.name} style={{ width:70, height:70, objectFit:"cover", borderRadius:10 }} />
+              ) : (
+                <div style={{ fontSize:32 }}>{p.image || "🛒"}</div>
+              )}
             </div>
             <div style={{ padding:"10px 12px" }}>
               <div style={{ fontWeight:700, fontSize:14, marginBottom:2 }}>{p.name}</div>
@@ -804,13 +732,29 @@ function CatalogPage({ data, setData, toast }) {
 
 function ProductModal({ product, onSave, onClose }) {
   const isEdit = !!product;
-  const [name, setName]       = useState(product?.name || "");
-  const [cat, setCat]         = useState(product?.category || "");
-  const [price, setPrice]     = useState(String(product?.price || ""));
-  const [image, setImage]     = useState(product?.image || "");
+  const [name, setName]         = useState(product?.name || "");
+  const [cat, setCat]           = useState(product?.category || "");
+  const [price, setPrice]       = useState(String(product?.price || ""));
+  const [image, setImage]       = useState(product?.image || ""); // emoji or base64
   const [variants, setVariants] = useState(product?.variants || []);
-  const [vName, setVName]     = useState("");
-  const [vPrice, setVPrice]   = useState("");
+  const [vName, setVName]       = useState("");
+  const [vPrice, setVPrice]     = useState("");
+  const [imgMode, setImgMode]   = useState(product?.image?.startsWith("data:") ? "file" : "emoji");
+  const [uploading, setUploading] = useState(false);
+
+  const handleImageFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert("圖片不能超過 2MB"); return; }
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setImage(ev.target.result); // base64 data URL
+      setImgMode("file");
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
@@ -822,16 +766,15 @@ function ProductModal({ product, onSave, onClose }) {
   const save = () => {
     const cleanName = sanitize(name, 100);
     if (!cleanName) return alert("請填寫商品名稱");
-    const prod = {
+    onSave({
       id: product?.id || secureUid(),
       name: cleanName,
       category: sanitize(cat, 50),
       price: Math.max(0, Number(price)||0),
-      image: sanitize(image, 10),
+      image: imgMode === "emoji" ? sanitize(image, 10) : image,
       status: product?.status || "on",
       variants,
-    };
-    onSave(prod);
+    });
   };
 
   return (
@@ -841,24 +784,63 @@ function ProductModal({ product, onSave, onClose }) {
           <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
           <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-          <Input label="定價 NT$（選填）" type="number" value={price} onChange={setPrice} placeholder="0 = 洽詢" />
-          <Input label="圖示 Emoji" value={image} onChange={setImage} placeholder="💊" />
+        <Input label="定價 NT$（0 = 洽詢）" type="number" value={price} onChange={setPrice} placeholder="0" />
+
+        {/* Image upload section */}
+        <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
+          <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>商品圖片</div>
+          <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+            <button onClick={()=>setImgMode("emoji")} style={{ padding:"6px 14px", borderRadius:8, border:`1.5px solid ${imgMode==="emoji"?C.accent:C.border}`, background:imgMode==="emoji"?C.accentBg:"transparent", color:imgMode==="emoji"?C.accentDark:C.muted, cursor:"pointer", fontSize:12, fontWeight:600 }}>Emoji 圖示</button>
+            <button onClick={()=>setImgMode("file")} style={{ padding:"6px 14px", borderRadius:8, border:`1.5px solid ${imgMode==="file"?C.accent:C.border}`, background:imgMode==="file"?C.accentBg:"transparent", color:imgMode==="file"?C.accentDark:C.muted, cursor:"pointer", fontSize:12, fontWeight:600 }}>上傳圖片</button>
+          </div>
+
+          {imgMode === "emoji" ? (
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <Input label="Emoji 圖示" value={image} onChange={v => setImage(v.slice(0,4))} placeholder="💊 🎀 🛍" style={{ flex:1 }} />
+              <div style={{ width:56, height:56, background:C.bgDeep, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, border:`1.5px solid ${C.border}`, flexShrink:0 }}>
+                {image || "🛒"}
+              </div>
+            </div>
+          ) : (
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ flex:1 }}>
+                <label style={{ display:"block", cursor:"pointer" }}>
+                  <div style={{ border:`2px dashed ${C.accent}`, borderRadius:12, padding:"16px 20px", textAlign:"center", background:C.accentBg, cursor:"pointer" }}>
+                    {uploading ? (
+                      <div style={{ color:C.muted, fontSize:13 }}>上傳中…</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize:24, marginBottom:6 }}>📷</div>
+                        <div style={{ fontSize:12, color:C.accentDark, fontWeight:600 }}>點擊選擇圖片</div>
+                        <div style={{ fontSize:11, color:C.muted, marginTop:3 }}>JPG / PNG，最大 2MB</div>
+                      </>
+                    )}
+                  </div>
+                  <input type="file" accept="image/*" onChange={handleImageFile} style={{ display:"none" }} />
+                </label>
+              </div>
+              {/* Preview */}
+              <div style={{ width:80, height:80, background:C.bgDeep, borderRadius:12, overflow:"hidden", border:`1.5px solid ${C.border}`, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {image && image.startsWith("data:") ? (
+                  <img src={image} alt="preview" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                ) : (
+                  <span style={{ fontSize:11, color:C.muted }}>預覽</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Variants */}
         <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
-          <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>款式設定</div>
+          <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:6 }}>款式設定</div>
           <div style={{ fontSize:12, color:C.muted, marginBottom:12, lineHeight:1.7 }}>
-            例如：顏色（紅色、藍色）、尺寸（S / M / L）、口味…等<br/>
-            客人下單時可從中選擇
+            例如：顏色（紅色、藍色）、尺寸（S / M / L）<br/>客人下單時可從中選擇
           </div>
-
-          {/* Existing variants */}
           {variants.length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
               {variants.map(v => (
-                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:C.bgDeep, border:`1px solid ${C.border}` }}>
+                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:C.bgDeep, borderRadius:8, border:`1px solid ${C.border}` }}>
                   <div style={{ flex:1 }}>
                     <span style={{ fontSize:13, fontWeight:600 }}>{v.name}</span>
                     {v.price > 0 && <span style={{ fontSize:11, color:C.muted, marginLeft:8 }}>+NT${v.price}</span>}
@@ -868,11 +850,9 @@ function ProductModal({ product, onSave, onClose }) {
               ))}
             </div>
           )}
-
-          {/* Add variant form */}
           <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
             <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ flex:2 }} />
-            <Input label="加價 NT$（選填）" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ flex:1 }} />
+            <Input label="加價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ flex:1 }} />
             <Btn sm variant="soft" onClick={addVariant} style={{ marginBottom:1 }}>+ 新增</Btn>
           </div>
         </div>
@@ -890,21 +870,9 @@ function InStockPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
 
-  const del = async id => {
-    setData(d => ({ ...d, inStock: d.inStock.filter(x=>x.id!==id) }));
-    if (isConfigured) { try { await deleteInStock(id); } catch(e) { toast("⚠️ 刪除同步失敗"); } }
-    toast("已刪除");
-  };
-  const saveNew = async item => {
-    setData(d => ({ ...d, inStock: [item, ...d.inStock] }));
-    if (isConfigured) { try { await upsertInStock(item); } catch(e) { toast("⚠️ 新增同步失敗"); } }
-    toast("現貨已新增"); setShowAdd(false);
-  };
-  const saveEdit = async item => {
-    setData(d => ({ ...d, inStock: d.inStock.map(x => x.id===item.id ? item : x) }));
-    if (isConfigured) { try { await upsertInStock(item); } catch(e) { toast("⚠️ 儲存同步失敗"); } }
-    toast("已儲存"); setEditing(null);
-  };
+  const del = id => { setData(d => ({ ...d, inStock: d.inStock.filter(x=>x.id!==id) })); toast("已刪除"); };
+  const saveNew  = item => { setData(d => ({ ...d, inStock: [item, ...d.inStock] })); toast("現貨已新增"); setShowAdd(false); };
+  const saveEdit = item => { setData(d => ({ ...d, inStock: d.inStock.map(x => x.id===item.id?item:x) })); toast("已儲存"); setEditing(null); };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -1011,11 +979,7 @@ function StockModal({ product, onSave, onClose }) {
 }
 
 function WishlistPage({ data, setData, toast }) {
-  const updateStatus = async (id, status) => {
-    setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id===id ? {...w,status} : w) }));
-    if (isConfigured) { try { await updateWishStatus(id, status); } catch(e) { toast("⚠️ 同步失敗"); } }
-    toast("已更新");
-  };
+  const updateStatus = (id, status) => { setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id===id?{...w,status}:w) })); toast("已更新"); };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>許願清單 ({data.wishlist.length})</div>
@@ -1048,30 +1012,21 @@ function AnnouncementsPage({ data, setData, toast }) {
   const startNew  = () => { setEditing("new"); setTitle(""); setContent(""); };
   const cancel    = () => { setEditing(null); setTitle(""); setContent(""); };
 
-  const save = async () => {
+  const save = () => {
     if (!title.trim() || !content.trim()) return alert("請填寫標題和內容");
     if (editing === "new") {
-      const ann = { id: uid(), title: title.trim(), content: content.trim(), createdAt: today() };
-      setData(d => ({ ...d, announcements: [ann, ...d.announcements] }));
-      if (isConfigured) { try { await upsertAnnouncement(ann); } catch(e) { toast("⚠️ 新增同步失敗"); } }
+      setData(d => ({ ...d, announcements: [{ id: uid(), title: title.trim(), content: content.trim(), createdAt: today() }, ...d.announcements] }));
       toast("公告已新增 📢");
     } else {
       setData(d => ({ ...d, announcements: d.announcements.map(a => a.id === editing ? { ...a, title: title.trim(), content: content.trim() } : a) }));
-      if (isConfigured) {
-        try {
-          const a = data.announcements.find(x => x.id === editing);
-          await upsertAnnouncement({ ...a, title: title.trim(), content: content.trim() });
-        } catch(e) { toast("⚠️ 儲存同步失敗"); }
-      }
       toast("公告已更新 ✅");
     }
     cancel();
   };
 
-  const del = async (id) => {
+  const del = (id) => {
     if (!window.confirm("確定刪除此公告？")) return;
     setData(d => ({ ...d, announcements: d.announcements.filter(a => a.id !== id) }));
-    if (isConfigured) { try { await deleteAnnouncement(id); } catch(e) { toast("⚠️ 刪除同步失敗"); } }
     toast("公告已刪除");
   };
 
@@ -1181,11 +1136,7 @@ function RatePage({ data, setData, toast }) {
               </div>
             </div>
           ))}
-          <Btn onClick={async () => {
-            setData(d => ({ ...d, rate: Number(jpy) }));
-            if (isConfigured) { try { await updateSetting("jpy_rate", jpy); } catch(e) { toast("⚠️ 儲存同步失敗"); return; } }
-            toast("匯率已儲存 💱");
-          }}>儲存匯率</Btn>
+          <Btn onClick={() => { setData(d => ({ ...d, rate: Number(jpy) })); toast("匯率已儲存 💱"); }}>儲存匯率</Btn>
         </div>
       </Card>
       <div style={{ fontWeight: 700, fontSize: 15, color: C.accentDark }}>🎰 扭蛋優惠定價</div>
@@ -1204,168 +1155,263 @@ function RatePage({ data, setData, toast }) {
   );
 }
 
-function CustomersPage({ data }) {
-  const [expandedId, setExpandedId] = useState(null);
+function CustomersPage({ data, setData, toast }) {
+  const [expandedId, setExpandedId]   = useState(null);
   const [detailFilter, setDetailFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const LEVEL_COLOR = { 鑽石: C.blue, 黃金: C.yellow, 白銀: C.muted };
-  const LEVEL_ICON  = { 鑽石: "💎", 黃金: "🥇", 白銀: "🥈" };
+  const [search, setSearch]           = useState("");
+  const [editingId, setEditingId]     = useState(null); // 編輯備註
+  const [noteInput, setNoteInput]     = useState("");
 
-  const filtered = data.customers.filter(c =>
-    !search.trim() || c.name.includes(search.trim()) || c.phone.includes(search.trim())
+  // ── 從訂單動態彙整客人清單 ──────────────────────────────────
+  // 不依賴 data.customers，直接從 data.orders 聚合
+  // key = customer_line_id（Supabase）或 customerId（本機）
+  const customerMap = {};
+  data.orders.forEach(o => {
+    const key   = o.customer_line_id || o.customerId || o.customerName;
+    const name  = o.customer_name    || o.customerName || "未知";
+    if (!customerMap[key]) {
+      customerMap[key] = {
+        id:     key,
+        name,
+        lineId: o.customer_line_id || o.customerId || "",
+        note:   data.customerNotes?.[key] || "",
+        orders: [],
+      };
+    }
+    customerMap[key].orders.push(o);
+  });
+  const allCustomers = Object.values(customerMap).sort((a, b) => {
+    // 最近有訂單的排前面
+    const aLast = Math.max(...a.orders.map(o => new Date(o.created_at || o.createdAt || 0).getTime()));
+    const bLast = Math.max(...b.orders.map(o => new Date(o.created_at || o.createdAt || 0).getTime()));
+    return bLast - aLast;
+  });
+
+  // 搜尋
+  const filtered = allCustomers.filter(c =>
+    !search.trim() ||
+    c.name.includes(search.trim()) ||
+    c.lineId.includes(search.trim()) ||
+    c.note.includes(search.trim())
   );
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>客人管理 ({data.customers.length})</div>
+  // 儲存備註
+  const saveNote = (customerId) => {
+    setData(d => ({
+      ...d,
+      customerNotes: { ...(d.customerNotes || {}), [customerId]: sanitize(noteInput, 200) }
+    }));
+    setEditingId(null);
+    toast("備註已儲存");
+  };
 
-      {/* Search bar */}
-      <div style={{ position: "relative" }}>
-        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 15, color: C.muted, pointerEvents: "none" }}>🔍</span>
+  // 狀態更新（直接在這頁也能改）
+  const updateStatus = (orderId, status) => {
+    const safe = ["pending_review","pending","bought","shipped","arrived","cancelled"].includes(status) ? status : "pending_review";
+    setData(d => ({ ...d, orders: d.orders.map(o => o.id === orderId ? { ...o, status: safe } : o) }));
+    toast("狀態已更新");
+  };
+
+  if (data.orders.length === 0) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>客人管理</div>
+        <Card style={{ textAlign:"center", padding:40, color:C.muted }}>
+          <div style={{ fontSize:36, marginBottom:12 }}>📋</div>
+          <div style={{ fontWeight:600, marginBottom:6 }}>還沒有任何訂單</div>
+          <div style={{ fontSize:13 }}>客人透過下單系統送出訂單後，<br/>會自動在這裡出現</div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>
+          客人管理（{allCustomers.length} 位）
+        </div>
+        <div style={{ fontSize:12, color:C.muted }}>
+          共 {data.orders.length} 筆訂單
+        </div>
+      </div>
+
+      {/* 搜尋 */}
+      <div style={{ position:"relative" }}>
+        <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:15, color:C.muted, pointerEvents:"none" }}>🔍</span>
         <input
           value={search}
           onChange={e => { setSearch(e.target.value); setExpandedId(null); }}
-          placeholder="搜尋客人姓名或電話…"
-          style={{
-            width: "100%", background: C.bg, border: `1.5px solid ${C.border}`,
-            borderRadius: 10, padding: "9px 14px 9px 36px", color: C.text, fontSize: 14,
-            transition: "border .15s",
-          }}
-          onFocus={e => { e.target.style.borderColor = C.accent; e.target.style.boxShadow = `0 0 0 3px ${C.accent}15`; }}
-          onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
+          placeholder="搜尋客人名稱、LINE ID、備註…"
+          style={{ width:"100%", background:C.bg, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"9px 14px 9px 36px", color:C.text, fontSize:14 }}
+          onFocus={e => { e.target.style.borderColor=C.accent; e.target.style.boxShadow=`0 0 0 3px ${C.accent}15`; }}
+          onBlur={e => { e.target.style.borderColor=C.border; e.target.style.boxShadow="none"; }}
         />
         {search && (
-          <button onClick={() => { setSearch(""); setExpandedId(null); }} style={{
-            position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-            background: C.faint, border: "none", color: C.muted, width: 20, height: 20,
-            borderRadius: "50%", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-          }}>×</button>
+          <button onClick={() => { setSearch(""); setExpandedId(null); }} style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:C.faint, border:"none", color:C.muted, width:20, height:20, borderRadius:"50%", fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
         )}
       </div>
 
-      {filtered.length === 0 && (
-        <div style={{ textAlign: "center", padding: "32px 0", color: C.muted, fontSize: 14 }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-          找不到「{search}」相關客人
+      {search && <div style={{ fontSize:13, color:C.muted }}>找到 {filtered.length} 位客人</div>}
+      {search && filtered.length === 0 && (
+        <div style={{ textAlign:"center", padding:"32px 0", color:C.muted, fontSize:14 }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>🔍</div>找不到「{search}」
         </div>
       )}
 
-      <div style={{ fontSize: 13, color: C.muted }}>
-        {search ? `找到 ${filtered.length} 位客人` : "點擊客人卡片可展開完整下單明細 👆"}
-      </div>
-
+      {/* 客人卡片清單 */}
       {filtered.map(c => {
-        const orders = data.orders.filter(o => o.customerId === c.id);
-        const total  = orders.filter(o => o.status !== "cancelled").reduce((s, o) => s + o.total, 0);
-        const col    = LEVEL_COLOR[c.level] || C.muted;
-        const isOpen = expandedId === c.id;
-
-        const filteredOrders = detailFilter === "all"
-          ? orders
-          : orders.filter(o => o.status === detailFilter);
-
-        // Stats for this customer
-        const statuses = Object.keys(ORDER_STATUS);
-        const statusCounts = statuses.reduce((acc, s) => {
+        const orders     = c.orders;
+        const total      = orders.filter(o => o.status !== "cancelled").reduce((s, o) => s + (o.total || 0), 0);
+        const isOpen     = expandedId === c.id;
+        const isEditing  = editingId === c.id;
+        const statusCounts = Object.keys(ORDER_STATUS).reduce((acc, s) => {
           acc[s] = orders.filter(o => o.status === s).length;
           return acc;
         }, {});
+        const filteredOrders = detailFilter === "all" ? orders : orders.filter(o => o.status === detailFilter);
 
         return (
-          <div key={c.id} style={{ background: C.surface, border: `1.5px solid ${isOpen ? C.accent : C.border}`, borderRadius: 18, overflow: "hidden", boxShadow: isOpen ? C.shadowMd : C.shadow, transition: "all .2s" }}>
-            {/* Customer header row — clickable */}
+          <div key={c.id} style={{ background:C.surface, border:`1.5px solid ${isOpen ? C.accent : C.border}`, borderRadius:18, overflow:"hidden", boxShadow:isOpen ? C.shadowMd : C.shadow, transition:"all .2s" }}>
+
+            {/* 客人行 — 點擊展開 */}
             <div
-              onClick={() => { setExpandedId(isOpen ? null : c.id); setDetailFilter("all"); }}
-              style={{ padding: "16px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: isOpen ? C.accentBg : "transparent", transition: "background .15s" }}
+              onClick={() => { setExpandedId(isOpen ? null : c.id); setDetailFilter("all"); setEditingId(null); }}
+              style={{ padding:"16px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", background:isOpen ? C.accentBg : "transparent", transition:"background .15s" }}
             >
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ width: 46, height: 46, borderRadius: "50%", background: `${col}20`, border: `2px solid ${col}40`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: col, fontSize: 19, flexShrink: 0 }}>{c.name[0]}</div>
+              <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+                {/* 頭像 */}
+                <div style={{ width:46, height:46, borderRadius:"50%", background:C.accentBg, border:`2px solid ${C.accentLight}40`, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, color:C.accent, fontSize:19, flexShrink:0 }}>
+                  {c.name?.[0] || "?"}
+                </div>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{c.name}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{c.phone}</div>
-                  <span className="pill" style={{ background: `${col}15`, color: col, fontSize: 11, marginTop: 3 }}>{LEVEL_ICON[c.level]} {c.level}會員</span>
+                  <div style={{ fontWeight:700, fontSize:15 }}>{c.name}</div>
+                  {c.note
+                    ? <div style={{ fontSize:11, color:C.accent, marginTop:2 }}>📝 {c.note}</div>
+                    : <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>LINE：{c.lineId ? c.lineId.slice(0,12)+"…" : "—"}</div>
+                  }
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: C.muted }}>訂單 / 消費</div>
-                  <div style={{ fontWeight: 700, color: C.accentDark }}>{orders.length} 筆 / {fmtMoney(total)}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:11, color:C.muted }}>訂單 / 消費</div>
+                  <div style={{ fontWeight:700, color:C.accentDark }}>{orders.length} 筆 / {fmtMoney(total)}</div>
                 </div>
-                <div style={{ fontSize: 20, color: C.muted, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }}>›</div>
+                <div style={{ fontSize:20, color:C.muted, transform:isOpen?"rotate(90deg)":"none", transition:"transform .2s" }}>›</div>
               </div>
             </div>
 
-            {/* Expanded detail */}
+            {/* 展開內容 */}
             {isOpen && (
-              <div className="fade" style={{ borderTop: `1.5px solid ${C.border}` }}>
-                {/* Summary stats bar */}
-                <div style={{ padding: "14px 18px", background: C.bgDeep, display: "flex", gap: 8, overflowX: "auto" }}>
+              <div className="fade" style={{ borderTop:`1.5px solid ${C.border}` }}>
+
+                {/* 備註列 */}
+                <div style={{ padding:"12px 18px", background:C.bgDeep, display:"flex", alignItems:"center", gap:10 }}>
+                  {isEditing ? (
+                    <>
+                      <input
+                        value={noteInput}
+                        onChange={e => setNoteInput(e.target.value)}
+                        placeholder="輸入備註（電話、地址、VIP 等）"
+                        maxLength={200}
+                        style={{ flex:1, background:C.bg, border:`1.5px solid ${C.accent}`, borderRadius:8, padding:"7px 12px", fontSize:13, color:C.text }}
+                        autoFocus
+                        onKeyDown={e => { if (e.key==="Enter") saveNote(c.id); if (e.key==="Escape") setEditingId(null); }}
+                      />
+                      <Btn sm onClick={() => saveNote(c.id)}>儲存</Btn>
+                      <Btn sm variant="ghost" onClick={() => setEditingId(null)}>取消</Btn>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ flex:1, fontSize:13, color:c.note ? C.text : C.muted }}>
+                        📝 {c.note || "尚無備註（可記電話、地址、VIP 備注）"}
+                      </div>
+                      <Btn sm variant="ghost" onClick={e => { e.stopPropagation(); setNoteInput(c.note||""); setEditingId(c.id); }}>✏️ 編輯</Btn>
+                    </>
+                  )}
+                </div>
+
+                {/* 狀態篩選列 */}
+                <div style={{ padding:"12px 18px 8px", background:C.bgDeep, display:"flex", gap:8, overflowX:"auto" }}>
                   {[
-                    { label: "全部", value: orders.length, key: "all", color: C.text },
-                    ...Object.entries(ORDER_STATUS).map(([k, v]) => ({ label: v.label, value: statusCounts[k], key: k, color: v.color, icon: v.icon }))
+                    { label:"全部", value:orders.length, key:"all", color:C.text },
+                    ...Object.entries(ORDER_STATUS).map(([k,v]) => ({ label:v.label, value:statusCounts[k], key:k, color:v.color, icon:v.icon }))
                   ].filter(s => s.value > 0 || s.key === "all").map(s => (
                     <button key={s.key} onClick={() => setDetailFilter(s.key)} style={{
-                      flexShrink: 0, background: detailFilter === s.key ? C.surface : "transparent",
-                      border: `1.5px solid ${detailFilter === s.key ? C.accent : C.border}`,
-                      borderRadius: 10, padding: "6px 12px", cursor: "pointer", textAlign: "center", transition: "all .15s",
+                      flexShrink:0, background:detailFilter===s.key ? C.surface : "transparent",
+                      border:`1.5px solid ${detailFilter===s.key ? C.accent : C.border}`,
+                      borderRadius:10, padding:"6px 12px", cursor:"pointer", textAlign:"center", transition:"all .15s",
                     }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
-                      <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>{s.icon ? `${s.icon} ` : ""}{s.label}</div>
+                      <div style={{ fontSize:16, fontWeight:700, color:s.color }}>{s.value}</div>
+                      <div style={{ fontSize:10, color:C.muted, marginTop:1 }}>{s.icon||""} {s.label}</div>
                     </button>
                   ))}
                 </div>
 
-                {/* Orders list */}
-                <div style={{ padding: "12px 18px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* 訂單明細 */}
+                <div style={{ padding:"10px 18px 16px", display:"flex", flexDirection:"column", gap:10 }}>
                   {filteredOrders.length === 0 && (
-                    <div style={{ textAlign: "center", padding: 24, color: C.muted, fontSize: 14 }}>此狀態沒有訂單</div>
+                    <div style={{ textAlign:"center", padding:24, color:C.muted, fontSize:14 }}>此狀態沒有訂單</div>
                   )}
-                  {filteredOrders.map(o => (
-                    <div key={o.id} style={{ background: C.bg, borderRadius: 14, border: `1.5px solid ${C.border}`, overflow: "hidden" }}>
-                      {/* Order header */}
-                      <div style={{ padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div>
-                          <div style={{ fontSize: 11, color: C.muted, marginBottom: 3 }}>#{o.no} · {o.createdAt}</div>
-                          <div style={{ fontWeight: 700, fontSize: 14 }}>
-                            {o.items[0]?.name}{o.items.length > 1 ? ` 等 ${o.items.length} 件` : ""}
-                          </div>
-                        </div>
-                        <StatusBadge status={o.status} />
-                      </div>
-
-                      {/* Item breakdown */}
-                      <div style={{ margin: "0 14px", background: C.surface, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}` }}>
-                        {o.items.map((it, i) => (
-                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", borderBottom: i < o.items.length - 1 ? `1px solid ${C.borderSoft}` : "none" }}>
-                            <div>
-                              <div style={{ fontSize: 13, fontWeight: 600 }}>{it.name}</div>
-                              {it.note && <div style={{ fontSize: 11, color: C.muted }}>備註：{it.note}</div>}
-                            </div>
-                            <div style={{ textAlign: "right", fontSize: 13 }}>
-                              <div style={{ color: C.muted }}>×{it.qty}</div>
-                              <div style={{ fontWeight: 700 }}>{fmtMoney(it.price * it.qty)}</div>
+                  {filteredOrders.map(o => {
+                    const createdDate = o.created_at
+                      ? new Date(o.created_at).toLocaleDateString("zh-TW")
+                      : (o.createdAt || "—");
+                    return (
+                      <div key={o.id} style={{ background:C.bg, borderRadius:14, border:`1.5px solid ${C.border}`, overflow:"hidden" }}>
+                        {/* 訂單 header */}
+                        <div style={{ padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                          <div>
+                            <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>#{o.no} · {createdDate}</div>
+                            <div style={{ fontWeight:700, fontSize:14 }}>
+                              {o.items?.[0]?.name}{(o.items?.length||0) > 1 ? ` 等 ${o.items.length} 件` : ""}
                             </div>
                           </div>
-                        ))}
-                      </div>
-
-                      {/* Footer */}
-                      <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ fontSize: 12, color: C.muted }}>
-                          成本 {fmtMoney(o.items.reduce((s,it)=>s+(it.cost||0)*it.qty,0))}
-                          <span style={{ margin: "0 6px", color: C.faint }}>·</span>
-                          <span style={{ color: C.green, fontWeight: 600 }}>利潤 {fmtMoney(o.profit||0)}</span>
+                          {/* 可直接改狀態 */}
+                          <select
+                            value={o.status}
+                            onChange={e => updateStatus(o.id, e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            style={{ background:C.bg, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"4px 8px", fontSize:12, cursor:"pointer", color:C.text }}
+                          >
+                            {Object.entries(ORDER_STATUS).map(([k,v]) => (
+                              <option key={k} value={k}>{v.icon} {v.label}</option>
+                            ))}
+                          </select>
                         </div>
-                        <div style={{ fontWeight: 700, color: C.accentDark }}>{fmtMoney(o.total)}</div>
+
+                        {/* 商品明細 */}
+                        <div style={{ margin:"0 14px", background:C.surface, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}` }}>
+                          {(o.items||[]).map((it, i) => (
+                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none" }}>
+                              <div>
+                                <div style={{ fontSize:13, fontWeight:600 }}>{it.name}</div>
+                                {it.note && <div style={{ fontSize:11, color:C.muted }}>備註：{it.note}</div>}
+                              </div>
+                              <div style={{ textAlign:"right", fontSize:13 }}>
+                                <div style={{ color:C.muted }}>×{it.qty}</div>
+                                <div style={{ fontWeight:700 }}>{fmtMoney((it.price||0) * (it.qty||1))}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* 訂單 footer */}
+                        <div style={{ padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                          <div style={{ fontSize:12, color:C.muted }}>
+                            {o.profit > 0 && <span style={{ color:C.green, fontWeight:600 }}>利潤 {fmtMoney(o.profit)}</span>}
+                          </div>
+                          <div style={{ fontWeight:700, color:C.accentDark }}>{fmtMoney(o.total)}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
-                {/* Customer total summary */}
-                <div style={{ margin: "0 18px 16px", background: C.accentBg, borderRadius: 12, padding: "12px 16px", display: "flex", justifyContent: "space-between", border: `1.5px solid ${C.accentLight}40` }}>
-                  <div style={{ fontSize: 13, color: C.accentDark, fontWeight: 600 }}>💰 消費總計（不含取消）</div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark, fontFamily: "'DM Serif Display',serif" }}>{fmtMoney(total)}</div>
+                {/* 小計 */}
+                <div style={{ margin:"0 18px 16px", background:C.accentBg, borderRadius:12, padding:"12px 16px", display:"flex", justifyContent:"space-between", border:`1.5px solid ${C.accentLight}40` }}>
+                  <div style={{ fontSize:13, color:C.accentDark, fontWeight:600 }}>💰 消費總計（不含取消）</div>
+                  <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>{fmtMoney(total)}</div>
                 </div>
               </div>
             )}
