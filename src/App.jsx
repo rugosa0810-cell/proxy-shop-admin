@@ -542,14 +542,22 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
     if (onFilterChange) onFilterChange(s);
   };
 
-  const updateStatus = (id, status) => {
+  const updateStatus = async (id, status) => {
     const safeS = safeStatus(status);
     const o = data.orders.find(x => x.id === id);
+    const { error } = await supabase.from("orders").update({ status: safeS, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) { toast("更新失敗"); return; }
     setData(d => ({ ...d, orders: d.orders.map(o => o.id === id ? { ...o, status: safeS } : o) }));
     logAction("更新訂單狀態", `#${o?.no} → ${ORDER_STATUS[safeS]?.label}`);
     toast("狀態已更新");
   };
-  const del = (id) => { if (!window.confirm("確定刪除？")) return; setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) })); toast("已刪除"); };
+  const del = async (id) => {
+    if (!window.confirm("確定刪除？")) return;
+    const { error } = await supabase.from("orders").delete().eq("id", id);
+    if (error) { toast("刪除失敗"); return; }
+    setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) }));
+    toast("已刪除");
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -719,13 +727,41 @@ function ReviewPage({ data, setData, toast }) {
 
 function CatalogPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [editing, setEditing] = useState(null); // product being edited
+  const [editing, setEditing] = useState(null);
 
-  const toggle = id => { setData(d => ({ ...d, products: d.products.map(p => p.id===id?{...p,status:p.status==="on"?"off":"on"}:p) })); };
-  const del = id => { if (!window.confirm("確定刪除？")) return; setData(d => ({ ...d, products: d.products.filter(p=>p.id!==id) })); toast("已刪除"); };
+  const toggle = async (id) => {
+    const p = data.products.find(x => x.id === id);
+    if (!p) return;
+    const newStatus = p.status === "on" ? "off" : "on";
+    const { error } = await supabase.from("products").update({ status: newStatus }).eq("id", id);
+    if (error) { toast("更新失敗"); return; }
+    setData(d => ({ ...d, products: d.products.map(x => x.id===id ? {...x, status:newStatus} : x) }));
+    toast(newStatus === "on" ? "已上架" : "已下架");
+  };
 
-  const saveNew = (prod) => { setData(d => ({ ...d, products: [prod, ...d.products] })); toast("商品已新增"); setShowAdd(false); };
-  const saveEdit = (prod) => { setData(d => ({ ...d, products: d.products.map(p => p.id===prod.id?prod:p) })); toast("已儲存"); setEditing(null); };
+  const del = async (id) => {
+    if (!window.confirm("確定刪除？")) return;
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) { toast("刪除失敗"); return; }
+    setData(d => ({ ...d, products: d.products.filter(p => p.id !== id) }));
+    toast("已刪除");
+  };
+
+  const saveNew = async (prod) => {
+    const { data: saved, error } = await supabase.from("products").insert([{ ...prod, created_at: new Date().toISOString() }]).select().single();
+    if (error) { toast("新增失敗"); return; }
+    setData(d => ({ ...d, products: [saved, ...d.products] }));
+    toast("商品已新增");
+    setShowAdd(false);
+  };
+
+  const saveEdit = async (prod) => {
+    const { error } = await supabase.from("products").update(prod).eq("id", prod.id);
+    if (error) { toast("儲存失敗"); return; }
+    setData(d => ({ ...d, products: d.products.map(p => p.id===prod.id ? prod : p) }));
+    toast("已儲存");
+    setEditing(null);
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -913,9 +949,29 @@ function InStockPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
 
-  const del = id => { setData(d => ({ ...d, inStock: d.inStock.filter(x=>x.id!==id) })); toast("已刪除"); };
-  const saveNew  = item => { setData(d => ({ ...d, inStock: [item, ...d.inStock] })); toast("現貨已新增"); setShowAdd(false); };
-  const saveEdit = item => { setData(d => ({ ...d, inStock: d.inStock.map(x => x.id===item.id?item:x) })); toast("已儲存"); setEditing(null); };
+  const del = async (id) => {
+    if (!window.confirm("確定刪除？")) return;
+    const { error } = await supabase.from("in_stock").delete().eq("id", id);
+    if (error) { toast("刪除失敗"); return; }
+    setData(d => ({ ...d, inStock: d.inStock.filter(x => x.id !== id) }));
+    toast("已刪除");
+  };
+
+  const saveNew = async (item) => {
+    const { data: saved, error } = await supabase.from("in_stock").insert([{ ...item, created_at: new Date().toISOString() }]).select().single();
+    if (error) { toast("新增失敗"); return; }
+    setData(d => ({ ...d, inStock: [saved, ...d.inStock] }));
+    toast("現貨已新增");
+    setShowAdd(false);
+  };
+
+  const saveEdit = async (item) => {
+    const { error } = await supabase.from("in_stock").update(item).eq("id", item.id);
+    if (error) { toast("儲存失敗"); return; }
+    setData(d => ({ ...d, inStock: d.inStock.map(x => x.id===item.id ? item : x) }));
+    toast("已儲存");
+    setEditing(null);
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -1022,7 +1078,12 @@ function StockModal({ product, onSave, onClose }) {
 }
 
 function WishlistPage({ data, setData, toast }) {
-  const updateStatus = (id, status) => { setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id===id?{...w,status}:w) })); toast("已更新"); };
+  const updateStatus = async (id, status) => {
+    const { error } = await supabase.from("wishlist").update({ status }).eq("id", id);
+    if (error) { toast("更新失敗"); return; }
+    setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id===id ? {...w,status} : w) }));
+    toast("已更新");
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>許願清單 ({data.wishlist.length})</div>
@@ -1032,7 +1093,7 @@ function WishlistPage({ data, setData, toast }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontWeight: 700 }}>{w.name}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>客人：{w.customerName}</div>
+              <div style={{ fontSize: 13, color: C.muted }}>客人：{w.customer_name || w.customerName}</div>
               {w.note && <div style={{ fontSize: 12, color: C.muted }}>✏️ {w.note}</div>}
             </div>
             <select value={w.status} onChange={e => updateStatus(w.id, e.target.value)} style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
@@ -1047,7 +1108,7 @@ function WishlistPage({ data, setData, toast }) {
 }
 
 function AnnouncementsPage({ data, setData, toast }) {
-  const [editing, setEditing] = useState(null); // { id, title, content } or "new"
+  const [editing, setEditing] = useState(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
 
@@ -1055,20 +1116,27 @@ function AnnouncementsPage({ data, setData, toast }) {
   const startNew  = () => { setEditing("new"); setTitle(""); setContent(""); };
   const cancel    = () => { setEditing(null); setTitle(""); setContent(""); };
 
-  const save = () => {
+  const save = async () => {
     if (!title.trim() || !content.trim()) return alert("請填寫標題和內容");
     if (editing === "new") {
-      setData(d => ({ ...d, announcements: [{ id: uid(), title: title.trim(), content: content.trim(), createdAt: today() }, ...d.announcements] }));
+      const newAnn = { id: secureUid(), title: title.trim(), content: content.trim(), created_at: new Date().toISOString() };
+      const { data: saved, error } = await supabase.from("announcements").insert([newAnn]).select().single();
+      if (error) { toast("新增失敗"); return; }
+      setData(d => ({ ...d, announcements: [saved, ...d.announcements] }));
       toast("公告已新增 📢");
     } else {
+      const { error } = await supabase.from("announcements").update({ title: title.trim(), content: content.trim() }).eq("id", editing);
+      if (error) { toast("更新失敗"); return; }
       setData(d => ({ ...d, announcements: d.announcements.map(a => a.id === editing ? { ...a, title: title.trim(), content: content.trim() } : a) }));
       toast("公告已更新 ✅");
     }
     cancel();
   };
 
-  const del = (id) => {
+  const del = async (id) => {
     if (!window.confirm("確定刪除此公告？")) return;
+    const { error } = await supabase.from("announcements").delete().eq("id", id);
+    if (error) { toast("刪除失敗"); return; }
     setData(d => ({ ...d, announcements: d.announcements.filter(a => a.id !== id) }));
     toast("公告已刪除");
   };
@@ -1249,8 +1317,10 @@ function CustomersPage({ data, setData, toast }) {
   };
 
   // 狀態更新（直接在這頁也能改）
-  const updateStatus = (orderId, status) => {
+  const updateStatus = async (orderId, status) => {
     const safe = ["pending_review","pending","bought","shipped","arrived","cancelled"].includes(status) ? status : "pending_review";
+    const { error } = await supabase.from("orders").update({ status: safe, updated_at: new Date().toISOString() }).eq("id", orderId);
+    if (error) { toast("更新失敗"); return; }
     setData(d => ({ ...d, orders: d.orders.map(o => o.id === orderId ? { ...o, status: safe } : o) }));
     toast("狀態已更新");
   };
