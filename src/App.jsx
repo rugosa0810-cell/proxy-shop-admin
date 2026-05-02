@@ -1078,31 +1078,112 @@ function StockModal({ product, onSave, onClose }) {
 }
 
 function WishlistPage({ data, setData, toast }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editPrice, setEditPrice] = useState("");
+  const [editNote, setEditNote] = useState("");
+
   const updateStatus = async (id, status) => {
     const { error } = await supabase.from("wishlist").update({ status }).eq("id", id);
     if (error) { toast("更新失敗"); return; }
     setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id===id ? {...w,status} : w) }));
+    if (status === "found") {
+      setEditingId(id);
+      const w = data.wishlist.find(x => x.id === id);
+      setEditPrice(w?.price ? String(w.price) : "");
+      setEditNote(w?.found_note || "");
+    }
     toast("已更新");
   };
+
+  const saveQuote = async (id) => {
+    const price = Math.max(0, Number(editPrice) || 0);
+    const found_note = editNote.trim().slice(0, 200);
+    const { error } = await supabase.from("wishlist").update({ price, found_note }).eq("id", id);
+    if (error) { toast("儲存失敗"); return; }
+    setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id===id ? {...w, price, found_note} : w) }));
+    setEditingId(null); setEditPrice(""); setEditNote("");
+    toast("報價已通知客人 ✅");
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>許願清單 ({data.wishlist.length})</div>
       {!data.wishlist.length && <Card style={{ textAlign:"center" }}><div style={{ fontSize:40 }}>⭐</div><div style={{ color:C.muted, marginTop:8 }}>還沒有客人許願</div></Card>}
-      {data.wishlist.map(w => (
-        <Card key={w.id}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>{w.name}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>客人：{w.customer_name || w.customerName}</div>
-              {w.note && <div style={{ fontSize: 12, color: C.muted }}>✏️ {w.note}</div>}
+      {data.wishlist.map(w => {
+        const isFound = w.status === "found";
+        const isEditing = editingId === w.id;
+        return (
+          <Card key={w.id}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: isFound ? 12 : 0 }}>
+              <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
+                <div style={{ fontWeight: 700 }}>{w.name}</div>
+                <div style={{ fontSize: 13, color: C.muted }}>客人：{w.customer_name || w.customerName}</div>
+                {w.note && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>✏️ {w.note}</div>}
+              </div>
+              <select value={w.status} onChange={e => updateStatus(w.id, e.target.value)}
+                style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
+                <option value="searching">⭐ 許願中</option>
+                <option value="found">✅ 找到了</option>
+              </select>
             </div>
-            <select value={w.status} onChange={e => updateStatus(w.id, e.target.value)} style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
-              <option value="searching">⭐ 許願中</option>
-              <option value="found">✅ 找到了</option>
-            </select>
-          </div>
-        </Card>
-      ))}
+
+            {/* 已找到：顯示報價區 */}
+            {isFound && (
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+                {isEditing ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontSize: 12, color: C.muted, fontWeight: 500 }}>回填報價給客人</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>報價 NT$</div>
+                        <input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)}
+                          placeholder="0"
+                          style={{ width: "100%", background: C.surface, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 14, color: C.text, outline: "none" }}
+                          onFocus={e => e.target.style.borderColor = C.accent}
+                          onBlur={e => e.target.style.borderColor = C.border}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>備註（可選）</div>
+                      <input value={editNote} onChange={e => setEditNote(e.target.value)}
+                        placeholder="例：京都限定款，數量有限"
+                        style={{ width: "100%", background: C.surface, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: C.text, outline: "none" }}
+                        onFocus={e => e.target.style.borderColor = C.accent}
+                        onBlur={e => e.target.style.borderColor = C.border}
+                      />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => saveQuote(w.id)}
+                        style={{ flex: 1, background: C.accent, color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                        儲存並通知客人
+                      </button>
+                      <button onClick={() => setEditingId(null)}
+                        style={{ background: C.bgDeep, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      {w.price > 0
+                        ? <><div style={{ fontSize: 13, color: C.muted }}>已回填報價</div><div style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>NT$ {Number(w.price).toLocaleString()}</div></>
+                        : <div style={{ fontSize: 13, color: C.muted }}>尚未回填報價</div>
+                      }
+                      {w.found_note && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{w.found_note}</div>}
+                    </div>
+                    <button onClick={() => { setEditingId(w.id); setEditPrice(w.price ? String(w.price) : ""); setEditNote(w.found_note || ""); }}
+                      style={{ background: C.bgDeep, color: C.textMid, border: `1px solid ${C.border}`, borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer" }}>
+                      {w.price > 0 ? "修改報價" : "填入報價"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }
