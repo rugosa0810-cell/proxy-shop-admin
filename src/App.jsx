@@ -1732,8 +1732,10 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
 
                         {/* 商品明細 */}
                         <div style={{ margin:"0 14px", background:C.surface, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}` }}>
-                          {(o.items||[]).map((it, i) => (
-                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none", gap:10 }}>
+                          {(o.items||[]).map((it, i) => {
+                            const isPaid = (o.item_payments||[])[i] === true;
+                            return (
+                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none", gap:10, background: isPaid ? "#f0faf3" : "transparent" }}>
                               <div style={{ display:"flex", alignItems:"center", gap:10, flex:1, minWidth:0 }}>
                                 {/* 品項圖片 */}
                                 <div style={{ width:40, height:40, borderRadius:8, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>
@@ -1745,16 +1747,33 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                                   }
                                 </div>
                                 <div style={{ minWidth:0 }}>
-                                  <div style={{ fontSize:13, fontWeight:600 }}>{it.name}</div>
+                                  <div style={{ fontSize:13, fontWeight:600, textDecoration: isPaid ? "line-through" : "none", color: isPaid ? C.muted : C.text }}>{it.name}</div>
                                   {it.note && <div style={{ fontSize:11, color:C.muted }}>備註：{it.note}</div>}
                                 </div>
                               </div>
-                              <div style={{ textAlign:"right", fontSize:13, flexShrink:0 }}>
-                                <div style={{ color:C.muted }}>×{it.qty}</div>
-                                <div style={{ fontWeight:700 }}>{fmtMoney((it.price||0) * (it.qty||1))}</div>
+                              <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                                <div style={{ textAlign:"right", fontSize:13 }}>
+                                  <div style={{ color:C.muted }}>×{it.qty}</div>
+                                  <div style={{ fontWeight:700 }}>{fmtMoney((it.price||0) * (it.qty||1))}</div>
+                                </div>
+                                {/* 付款狀態按鈕 */}
+                                <button onClick={async () => {
+                                  const payments = [...(o.item_payments || Array(o.items.length).fill(false))];
+                                  while (payments.length < o.items.length) payments.push(false);
+                                  payments[i] = !payments[i];
+                                  const { error } = await supabase.from("orders").update({ item_payments: payments }).eq("id", o.id);
+                                  if (!error) setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, item_payments: payments } : x) }));
+                                }}
+                                  style={{ fontSize:11, padding:"4px 10px", borderRadius:99, border:"none", cursor:"pointer", fontWeight:600, whiteSpace:"nowrap",
+                                    background: isPaid ? C.green : C.bgDeep,
+                                    color: isPaid ? "#fff" : C.muted,
+                                  }}>
+                                  {isPaid ? "✓ 已付款" : "未付款"}
+                                </button>
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
 
                         {/* 訂單 footer */}
@@ -1770,15 +1789,105 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                 </div>
 
                 {/* 小計 */}
-                <div style={{ margin:"0 18px 16px", background:C.accentBg, borderRadius:12, padding:"12px 16px", display:"flex", justifyContent:"space-between", border:`1.5px solid ${C.accentLight}40` }}>
+                <div style={{ margin:"0 18px 12px", background:C.accentBg, borderRadius:12, padding:"12px 16px", display:"flex", justifyContent:"space-between", border:`1.5px solid ${C.accentLight}40` }}>
                   <div style={{ fontSize:13, color:C.accentDark, fontWeight:600 }}>💰 消費總計（不含取消）</div>
                   <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>{fmtMoney(total)}</div>
                 </div>
+
+                {/* 合併訂單按鈕 */}
+                {orders.filter(o => o.status !== "cancelled").length > 1 && (
+                  <div style={{ margin:"0 18px 16px" }}>
+                    <MergeOrdersButton
+                      orders={orders.filter(o => o.status !== "cancelled")}
+                      customer={c}
+                      setData={setData}
+                      toast={toast}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function MergeOrdersButton({ orders, customer, setData, toast }) {
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState([]);
+  const [merging, setMerging] = useState(false);
+
+  const toggle = id => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+
+  const merge = async () => {
+    if (selected.length < 2) { toast("請至少選擇 2 筆訂單合併"); return; }
+    setMerging(true);
+    const toMerge = orders.filter(o => selected.includes(o.id));
+    const allItems = toMerge.flatMap(o => o.items || []);
+    const total = allItems.reduce((s, it) => s + (it.price||0) * (it.qty||1), 0);
+    const profit = toMerge.reduce((s, o) => s + (o.profit||0), 0);
+    const no = String(100000 + Math.floor(Math.random() * 900000));
+    const mergedOrder = {
+      id: crypto.randomUUID().replace(/-/g,"").slice(0,12),
+      no,
+      customer_line_id: customer.lineId,
+      customer_name: customer.name,
+      status: toMerge[0].status,
+      items: allItems,
+      total, profit,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      // 建立合併後訂單
+      const { data: saved, error } = await supabase.from("orders").insert([mergedOrder]).select().single();
+      if (error) throw error;
+      // 刪除原訂單
+      await supabase.from("orders").delete().in("id", selected);
+      setData(d => ({
+        ...d,
+        orders: [saved, ...d.orders.filter(o => !selected.includes(o.id))]
+      }));
+      toast(`✅ 已合併 ${selected.length} 筆訂單`);
+      setSelecting(false);
+      setSelected([]);
+    } catch(e) {
+      console.error(e);
+      toast("合併失敗，請稍後再試");
+    }
+    setMerging(false);
+  };
+
+  if (!selecting) return (
+    <button onClick={() => { setSelecting(true); setSelected([]); }}
+      style={{ width:"100%", background:C.bgDeep, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"9px", fontSize:12, color:C.textMid, cursor:"pointer", fontWeight:500 }}>
+      🔗 合併訂單
+    </button>
+  );
+
+  return (
+    <div style={{ background:C.bgDeep, borderRadius:12, padding:"14px", border:`1.5px solid ${C.accent}40` }}>
+      <div style={{ fontSize:12, color:C.accent, fontWeight:600, marginBottom:10 }}>選擇要合併的訂單（至少 2 筆）</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
+        {orders.map(o => (
+          <label key={o.id} style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", padding:"6px 8px", borderRadius:8, background: selected.includes(o.id) ? C.accentBg : "transparent", border: `1px solid ${selected.includes(o.id) ? C.accent : C.border}` }}>
+            <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)} style={{ accentColor: C.accent }} />
+            <span style={{ fontSize:12, flex:1 }}>#{o.no} · {o.items?.[0]?.name}{(o.items?.length||0)>1?` 等${o.items.length}件`:""}</span>
+            <span style={{ fontSize:12, fontWeight:600, color:C.accent }}>{fmtMoney(o.total)}</span>
+          </label>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={merge} disabled={merging || selected.length < 2}
+          style={{ flex:1, background: selected.length < 2 ? C.faint : C.accent, color:"#fff", border:"none", borderRadius:8, padding:"9px", fontSize:12, cursor: selected.length < 2 ? "not-allowed" : "pointer", fontWeight:600 }}>
+          {merging ? "合併中..." : `合併 ${selected.length} 筆`}
+        </button>
+        <button onClick={() => { setSelecting(false); setSelected([]); }}
+          style={{ background:C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"9px 16px", fontSize:12, cursor:"pointer", color:C.muted }}>
+          取消
+        </button>
+      </div>
     </div>
   );
 }
