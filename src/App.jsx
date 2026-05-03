@@ -642,49 +642,140 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
 }
 
 function AddOrderModal({ data, setData, onClose, toast }) {
-  const [customerId, setCustomerId] = useState(data.customers[0]?.id || "");
-  const [name, setName] = useState(""); const [cost, setCost] = useState(""); const [price, setPrice] = useState(""); const [qty, setQty] = useState("1"); const [note, setNote] = useState("");
-  const save = () => {
-    const cleanName = sanitize(name);
-    const cleanNote = sanitize(note);
-    if (!cleanName || !price) return alert("請填寫商品名稱和售價");
-    const costNum = Math.max(0, Number(cost) || 0);
-    const priceNum = Math.max(0, Number(price) || 0);
-    const qtyNum = Math.max(1, Math.min(999, Number(qty) || 1));
-    const c = data.customers.find(x => x.id === customerId);
-    if (!c) return alert("請選擇有效客人");
-    const o = {
-      id: secureUid(),
-      no: String(Math.floor(Math.random() * 9000) + 1000),
-      customerId,
-      customerName: sanitize(c.name),
+  // 從 members 撈客人清單，沒有則從訂單聚合
+  const memberList = (data.members || []).map(m => ({
+    id: m.line_user_id,
+    name: m.line_name || m.community_name || "未知",
+    communityName: m.community_name || "",
+  }));
+  // 補上訂單中有但 members 沒有的客人
+  const orderCustomers = [];
+  const seen = new Set(memberList.map(m => m.id));
+  data.orders.forEach(o => {
+    const key = o.customer_line_id || o.customerId;
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      orderCustomers.push({ id: key, name: o.customer_name || o.customerName || "未知", communityName: "" });
+    }
+  });
+  const allCustomers = [...memberList, ...orderCustomers];
+
+  const [customerId, setCustomerId] = useState(allCustomers[0]?.id || "");
+  const [items, setItems] = useState([
+    { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "" }
+  ]);
+
+  const updateItem = (id, key, val) => setItems(p => p.map(it => it.id === id ? { ...it, [key]: val } : it));
+  const addItem = () => setItems(p => [...p, { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "" }]);
+  const removeItem = id => setItems(p => p.filter(it => it.id !== id));
+
+  const save = async () => {
+    const c = allCustomers.find(x => x.id === customerId);
+    if (!c) return alert("請選擇客人");
+    const validItems = items.filter(it => it.name.trim());
+    if (!validItems.length) return alert("請至少填寫一項商品名稱");
+
+    const builtItems = validItems.map(it => {
+      const priceNum = Math.max(0, Number(it.price) || 0);
+      const costNum  = Math.max(0, Number(it.cost)  || 0);
+      const qtyNum   = Math.max(1, Math.min(999, Number(it.qty) || 1));
+      const fullName = [sanitize(it.name, 100), it.spec && sanitize(it.spec, 50), it.variant && sanitize(it.variant, 50)].filter(Boolean).join(" / ");
+      return { name: fullName, cost: costNum, price: priceNum, qty: qtyNum, note: "" };
+    });
+
+    const total  = builtItems.reduce((s, it) => s + it.price * it.qty, 0);
+    const profit = builtItems.reduce((s, it) => s + (it.price - it.cost) * it.qty, 0);
+    const no = String(100000 + Math.floor(Math.random() * 900000));
+
+    const orderData = {
+      id: secureUid(), no,
+      customer_line_id: c.id,
+      customer_name: sanitize(c.name, 50),
       status: "pending",
-      items: [{ name: cleanName, cost: costNum, price: priceNum, qty: qtyNum, note: cleanNote }],
-      total: priceNum * qtyNum,
-      profit: (priceNum - costNum) * qtyNum,
-      createdAt: today(),
+      items: builtItems,
+      total, profit,
+      created_at: new Date().toISOString(),
     };
-    setData(d => ({ ...d, orders: [o, ...d.orders] }));
-    logAction("新增訂單", `${c.name} · ${cleanName}`);
-    toast("訂單已新增 ✨"); onClose();
+
+    try {
+      const { data: saved, error } = await supabase.from("orders").insert([orderData]).select().single();
+      if (error) throw error;
+      setData(d => ({ ...d, orders: [saved, ...d.orders] }));
+      logAction("手動新增訂單", `${c.name} · ${builtItems.length} 項`);
+      toast("訂單已新增 ✨");
+      onClose();
+    } catch (e) {
+      console.error(e);
+      alert("新增失敗，請稍後再試");
+    }
   };
+
   return (
-    <Modal title="新增訂單" onClose={onClose}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <Modal title="手動新增訂單" onClose={onClose} wide>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+        {/* 選擇客人 */}
         <div>
-          <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase" }}>客人</label>
-          <select value={customerId} onChange={e => setCustomerId(e.target.value)} style={{ width: "100%", marginTop: 5, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14 }}>
-            {data.customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>選擇客人 *</label>
+          <select value={customerId} onChange={e => setCustomerId(e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, cursor: "pointer" }}>
+            {allCustomers.length === 0 && <option value="">尚無客人資料</option>}
+            {allCustomers.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}{c.communityName ? ` (${c.communityName})` : ""}
+              </option>
+            ))}
           </select>
         </div>
-        <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳 SPF50" />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-          <Input label="成本"   type="number" value={cost}  onChange={setCost}  placeholder="560" />
-          <Input label="售價 *" type="number" value={price} onChange={setPrice} placeholder="728" />
-          <Input label="數量"   type="number" value={qty}   onChange={setQty} />
+
+        {/* 品項清單 */}
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>商品品項</label>
+            <button onClick={addItem} style={{ fontSize: 12, color: C.accent, background: C.accentBg, border: `1px solid ${C.accent}40`, borderRadius: 8, padding: "4px 12px", cursor: "pointer" }}>+ 新增品項</button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {items.map((it, idx) => (
+              <div key={it.id} style={{ background: C.bgDeep, borderRadius: 12, padding: "14px 14px 10px", border: `1px solid ${C.border}`, position: "relative" }}>
+                {items.length > 1 && (
+                  <button onClick={() => removeItem(it.id)}
+                    style={{ position: "absolute", top: 10, right: 12, background: "none", border: "none", color: C.faint, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
+                )}
+                <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 10 }}>品項 {idx + 1}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <Input label="商品名稱 *" value={it.name} onChange={v => updateItem(it.id, "name", v)} placeholder="資生堂防曬乳 SPF50" />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <Input label="規格" value={it.spec} onChange={v => updateItem(it.id, "spec", v)} placeholder="50ml / 白色 / L號" />
+                    <Input label="款式" value={it.variant} onChange={v => updateItem(it.id, "variant", v)} placeholder="草莓款 / 限定版" />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                    <Input label="成本 NT$" type="number" value={it.cost} onChange={v => updateItem(it.id, "cost", v)} placeholder="560" />
+                    <Input label="售價 NT$ *" type="number" value={it.price} onChange={v => updateItem(it.id, "price", v)} placeholder="728" />
+                    <Input label="數量" type="number" value={it.qty} onChange={v => updateItem(it.id, "qty", v)} placeholder="1" />
+                  </div>
+                  {it.price && it.cost && Number(it.price) > 0 && (
+                    <div style={{ fontSize: 11, color: C.green }}>
+                      利潤：NT$ {((Number(it.price) - Number(it.cost)) * Number(it.qty || 1)).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-        <Input label="備註" value={note} onChange={setNote} placeholder="顏色、尺寸…" />
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+
+        {/* 合計 */}
+        {items.some(it => it.price) && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: C.accentBg, borderRadius: 10, border: `1px solid ${C.accent}30` }}>
+            <span style={{ fontSize: 13, color: C.muted }}>合計（{items.filter(it => it.name).length} 項）</span>
+            <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>
+              NT$ {items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0).toLocaleString()}
+            </span>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 4 }}>
           <Btn variant="ghost" onClick={onClose}>取消</Btn>
           <Btn onClick={save}>建立訂單</Btn>
         </div>
@@ -814,10 +905,12 @@ function ProductModal({ product, onSave, onClose }) {
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
   const [price, setPrice]       = useState(String(product?.price || ""));
+  const [cost, setCost]         = useState(String(product?.cost || ""));
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
   const [variants, setVariants] = useState(product?.variants || []);
   const [vName, setVName]       = useState("");
   const [vPrice, setVPrice]     = useState("");
+  const [vCost, setVCost]       = useState("");
   const [imgMode, setImgMode]   = useState(product?.image?.startsWith("data:") ? "file" : "emoji");
   const [uploading, setUploading] = useState(false);
 
@@ -837,8 +930,8 @@ function ProductModal({ product, onSave, onClose }) {
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0 }]);
-    setVName(""); setVPrice("");
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, cost:Number(vCost)||0 }]);
+    setVName(""); setVPrice(""); setVCost("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -850,6 +943,7 @@ function ProductModal({ product, onSave, onClose }) {
       name: cleanName,
       category: sanitize(cat, 50),
       price: Math.max(0, Number(price)||0),
+      cost: Math.max(0, Number(cost)||0),   // 成本：只在後台使用，不傳客人端
       image: imgMode === "emoji" ? sanitize(image, 10) : image,
       status: product?.status || "on",
       variants,
@@ -863,7 +957,13 @@ function ProductModal({ product, onSave, onClose }) {
           <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
           <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
         </div>
-        <Input label="定價 NT$（0 = 洽詢）" type="number" value={price} onChange={setPrice} placeholder="0" />
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <Input label="定價 NT$（0 = 洽詢）" type="number" value={price} onChange={setPrice} placeholder="0" />
+          <div>
+            <Input label="成本 NT$（僅後台可見）" type="number" value={cost} onChange={setCost} placeholder="0" />
+            <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>不會顯示給客人</div>
+          </div>
+        </div>
 
         {/* Image upload section */}
         <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
@@ -923,6 +1023,7 @@ function ProductModal({ product, onSave, onClose }) {
                   <div style={{ flex:1 }}>
                     <span style={{ fontSize:13, fontWeight:600 }}>{v.name}</span>
                     {v.price > 0 && <span style={{ fontSize:11, color:C.muted, marginLeft:8 }}>+NT${v.price}</span>}
+                    {v.cost > 0 && <span style={{ fontSize:11, color:C.red, marginLeft:8 }}>成本 NT${v.cost}</span>}
                   </div>
                   <button onClick={() => removeVariant(v.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:16 }}>×</button>
                 </div>
@@ -932,6 +1033,7 @@ function ProductModal({ product, onSave, onClose }) {
           <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
             <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ flex:2 }} />
             <Input label="加價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ flex:1 }} />
+            <Input label="成本 NT$" type="number" value={vCost} onChange={setVCost} placeholder="0" style={{ flex:1 }} />
             <Btn sm variant="soft" onClick={addVariant} style={{ marginBottom:1 }}>+ 新增</Btn>
           </div>
         </div>
@@ -1022,8 +1124,8 @@ function StockModal({ product, onSave, onClose }) {
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0 }]);
-    setVName(""); setVPrice("");
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, cost:Number(vCost)||0 }]);
+    setVName(""); setVPrice(""); setVCost("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -1054,6 +1156,7 @@ function StockModal({ product, onSave, onClose }) {
                   <div style={{ flex:1 }}>
                     <span style={{ fontSize:13, fontWeight:600 }}>{v.name}</span>
                     {v.price > 0 && <span style={{ fontSize:11, color:C.muted, marginLeft:8 }}>+NT${v.price}</span>}
+                    {v.cost > 0 && <span style={{ fontSize:11, color:C.red, marginLeft:8 }}>成本 NT${v.cost}</span>}
                   </div>
                   <button onClick={() => removeVariant(v.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:16 }}>×</button>
                 </div>
