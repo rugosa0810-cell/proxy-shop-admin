@@ -393,7 +393,8 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
       supabase.from("announcements").select("*").order("created_at", { ascending: false }),
       supabase.from("wishlist").select("*").order("created_at", { ascending: false }),
-    ]).then(([o, p, s, a, w]) => {
+      supabase.from("members").select("*"),
+    ]).then(([o, p, s, a, w, m]) => {
       setData(d => ({
         ...d,
         orders:        o.data || [],
@@ -401,6 +402,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         inStock:       s.data || [],
         announcements: a.data || [],
         wishlist:      w.data || [],
+        members:       m.data || [],
       }));
     }).catch(err => console.error("Supabase 載入失敗", err));
 
@@ -418,10 +420,45 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         setData(d => ({ ...d, wishlist: [payload.new, ...d.wishlist] }));
         showToast(`⭐ ${payload.new.customer_name} 許願了「${payload.new.name}」`);
       })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "wishlist" }, payload => {
+        setData(d => ({ ...d, wishlist: d.wishlist.map(w => w.id === payload.new.id ? payload.new : w) }));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "wishlist" }, payload => {
+        setData(d => ({ ...d, wishlist: d.wishlist.filter(w => w.id !== payload.old.id) }));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "orders" }, payload => {
+        setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== payload.old.id) }));
+      })
       .subscribe();
 
     return () => sub.unsubscribe();
   });
+
+  // ── LINE 推播通知 ───────────────────────────────────────────
+  const sendLineNotify = async (lineUserIds, message) => {
+    if (!lineUserIds || lineUserIds.length === 0) { showToast("找不到客人 LINE ID"); return; }
+    if (!message.trim()) { showToast("請填寫通知內容"); return; }
+    try {
+      const res = await fetch(
+        `https://pdvoxaluahzjnhvtirdi.supabase.co/functions/v1/send-line`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ to: lineUserIds, message }),
+        }
+      );
+      const result = await res.json();
+      const success = result.results?.filter(r => r.ok).length || 0;
+      const fail = result.results?.filter(r => !r.ok).length || 0;
+      showToast(`✅ 已發送 ${success} 人${fail > 0 ? `，${fail} 人失敗` : ""}`);
+    } catch (e) {
+      console.error(e);
+      showToast("發送失敗，請確認 Edge Function 設定");
+    }
+  };
 
   const totalOrders = data.orders.length;
   const pendingBuy  = data.orders.filter(o => o.status === "pending").length;
@@ -517,7 +554,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "announcements" && <AnnouncementsPage data={data} setData={setData} toast={showToast} />}
         {tab === "rate"          && <RatePage          data={data} setData={setData} toast={showToast} />}
-        {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} />}
+        {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
         {tab === "auditlog"      && <AuditLogPage />}
       </div>
@@ -792,11 +829,14 @@ function ReviewPage({ data, setData, toast }) {
     logAction("審核通過", `訂單 #${o?.no} · ${o?.customerName}`);
     toast("已審核通過 ✅");
   };
-  const reject = id => {
+  const reject = async id => {
     const o = data.orders.find(x => x.id === id);
-    setData(d => ({ ...d, orders: d.orders.map(o => o.id===id?{...o,status:"cancelled"}:o) }));
-    logAction("拒絕訂單", `訂單 #${o?.no} · ${o?.customerName}`);
-    toast("已拒絕");
+    if (!window.confirm(`確定拒絕並刪除訂單 #${o?.no}？此操作無法復原。`)) return;
+    const { error } = await supabase.from("orders").delete().eq("id", id);
+    if (error) { toast("刪除失敗"); return; }
+    setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) }));
+    logAction("拒絕並刪除訂單", `訂單 #${o?.no} · ${o?.customerName}`);
+    toast("已拒絕並刪除訂單");
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1450,12 +1490,13 @@ function RatePage({ data, setData, toast }) {
   );
 }
 
-function CustomersPage({ data, setData, toast }) {
+function CustomersPage({ data, setData, toast, sendLineNotify }) {
   const [expandedId, setExpandedId]   = useState(null);
   const [detailFilter, setDetailFilter] = useState("all");
   const [search, setSearch]           = useState("");
-  const [editingId, setEditingId]     = useState(null); // 編輯備註
+  const [editingId, setEditingId]     = useState(null);
   const [noteInput, setNoteInput]     = useState("");
+  const [notifyTargets, setNotifyTargets] = useState(null);
 
   // ── 從訂單動態彙整客人清單 ──────────────────────────────────
   // 不依賴 data.customers，直接從 data.orders 聚合
@@ -1524,13 +1565,21 @@ function CustomersPage({ data, setData, toast }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      {notifyTargets && (
+        <LineNotifyModal
+          targets={notifyTargets}
+          onSend={sendLineNotify}
+          onClose={() => setNotifyTargets(null)}
+        />
+      )}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>
           客人管理（{allCustomers.length} 位）
         </div>
-        <div style={{ fontSize:12, color:C.muted }}>
-          共 {data.orders.length} 筆訂單
-        </div>
+        <button onClick={() => setNotifyTargets(allCustomers.map(c => ({ name: c.name, lineUserId: c.lineId })))}
+          style={{ fontSize:12, background:"#3d4a3e", color:"#fff", border:"none", borderRadius:99, padding:"7px 16px", cursor:"pointer", fontWeight:600 }}>
+          📨 全體通知
+        </button>
       </div>
 
       {/* 搜尋 */}
@@ -1623,6 +1672,10 @@ function CustomersPage({ data, setData, toast }) {
                       <div style={{ flex:1, fontSize:13, color:c.note ? C.text : C.muted }}>
                         📝 {c.note || "尚無備註（可記電話、地址、VIP 備注）"}
                       </div>
+                      <button onClick={e => { e.stopPropagation(); setNotifyTargets([{ name: c.name, lineUserId: c.lineId }]); }}
+                        style={{ fontSize:11, background:"#3d4a3e", color:"#fff", border:"none", borderRadius:99, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontWeight:600 }}>
+                        📨 通知
+                      </button>
                       <Btn sm variant="ghost" onClick={e => { e.stopPropagation(); setNoteInput(c.note||""); setEditingId(c.id); }}>✏️ 編輯</Btn>
                     </>
                   )}
@@ -1680,12 +1733,23 @@ function CustomersPage({ data, setData, toast }) {
                         {/* 商品明細 */}
                         <div style={{ margin:"0 14px", background:C.surface, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}` }}>
                           {(o.items||[]).map((it, i) => (
-                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none" }}>
-                              <div>
-                                <div style={{ fontSize:13, fontWeight:600 }}>{it.name}</div>
-                                {it.note && <div style={{ fontSize:11, color:C.muted }}>備註：{it.note}</div>}
+                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none", gap:10 }}>
+                              <div style={{ display:"flex", alignItems:"center", gap:10, flex:1, minWidth:0 }}>
+                                {/* 品項圖片 */}
+                                <div style={{ width:40, height:40, borderRadius:8, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>
+                                  {it.image?.startsWith("data:")
+                                    ? <img src={it.image} alt={it.name} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                                    : it.image
+                                      ? <span>{it.image}</span>
+                                      : <span style={{ fontSize:16, color:C.faint }}>🛒</span>
+                                  }
+                                </div>
+                                <div style={{ minWidth:0 }}>
+                                  <div style={{ fontSize:13, fontWeight:600 }}>{it.name}</div>
+                                  {it.note && <div style={{ fontSize:11, color:C.muted }}>備註：{it.note}</div>}
+                                </div>
                               </div>
-                              <div style={{ textAlign:"right", fontSize:13 }}>
+                              <div style={{ textAlign:"right", fontSize:13, flexShrink:0 }}>
                                 <div style={{ color:C.muted }}>×{it.qty}</div>
                                 <div style={{ fontWeight:700 }}>{fmtMoney((it.price||0) * (it.qty||1))}</div>
                               </div>
@@ -1715,6 +1779,71 @@ function CustomersPage({ data, setData, toast }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function LineNotifyModal({ targets, onSend, onClose }) {
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const TEMPLATES = [
+    "您好！您的訂單已採購完成，請留意後續寄送通知 📦",
+    "您好！您的商品已從日本寄出，請稍候等待到台通知 ✈️",
+    "您好！您的商品已到台灣，我們會盡快安排出貨，請確認收件資訊 🎁",
+    "您好！您有一筆訂單待付款，請盡快完成付款，謝謝 💳",
+  ];
+  const send = async () => {
+    if (!message.trim()) return;
+    setSending(true);
+    const ids = targets.map(t => t.lineUserId).filter(Boolean);
+    await onSend(ids, message);
+    setSending(false);
+    onClose();
+  };
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1000 }}>
+      <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)", backdropFilter:"blur(4px)" }} onClick={onClose}/>
+      <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", background:"#fff", borderRadius:20, padding:24, width:"min(480px, 94vw)", boxShadow:"0 8px 40px rgba(0,0,0,.18)", maxHeight:"90vh", overflow:"auto" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div style={{ fontSize:16, fontWeight:700 }}>📨 傳送 LINE 通知</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#aaa" }}>×</button>
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <div style={{ fontSize:12, color:"#888", marginBottom:6, fontWeight:600 }}>收件人（{targets.length} 人）</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {targets.map((t,i)=>(
+              <span key={i} style={{ fontSize:12, background:"#eaede8", color:"#3d4a3e", padding:"3px 10px", borderRadius:99 }}>{t.name}</span>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:12, color:"#888", marginBottom:8, fontWeight:600 }}>快速範本</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {TEMPLATES.map((t,i)=>(
+              <button key={i} onClick={()=>setMessage(t)}
+                style={{ textAlign:"left", background:"#f5f3ef", border:"1.5px solid #e2dbd2", borderRadius:10, padding:"8px 12px", fontSize:12, color:"#4a4438", cursor:"pointer", lineHeight:1.5 }}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontSize:12, color:"#888", marginBottom:6, fontWeight:600 }}>自訂訊息 *</div>
+          <textarea value={message} onChange={e=>setMessage(e.target.value)} rows={5}
+            placeholder="輸入要傳送給客人的 LINE 訊息內容..."
+            style={{ width:"100%", background:"#fdfaf7", border:"1.5px solid #e2dbd2", borderRadius:12, padding:"11px 14px", fontSize:13, color:"#1e1a14", resize:"vertical", fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}
+            onFocus={e=>e.target.style.borderColor="#8b5e3c"} onBlur={e=>e.target.style.borderColor="#e2dbd2"}
+          />
+          <div style={{ fontSize:11, color:"#c0b8ac", marginTop:4 }}>{message.length} 字</div>
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ background:"transparent", border:"1.5px solid #e2dbd2", borderRadius:99, padding:"9px 20px", fontSize:13, cursor:"pointer", color:"#8a8070" }}>取消</button>
+          <button onClick={send} disabled={sending||!message.trim()}
+            style={{ background:sending||!message.trim()?"#c0b8ac":"#8b5e3c", color:"#fff", border:"none", borderRadius:99, padding:"9px 24px", fontSize:13, fontWeight:600, cursor:sending||!message.trim()?"not-allowed":"pointer" }}>
+            {sending?"發送中...":`發送給 ${targets.length} 人`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
