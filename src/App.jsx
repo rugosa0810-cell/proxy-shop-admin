@@ -679,7 +679,18 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
                 </select>
               </div>
             </div>
-            <div style={{ fontSize: 12, color: C.muted }}>{(o.items||[]).map(it => `${it.name} ×${it.qty}${it.note?`（${it.note}）`:""}`).join("・")}</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:4 }}>
+              {(o.items||[]).map((it,idx) => (
+                <div key={idx} style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <div style={{ width:28, height:28, borderRadius:6, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>
+                    {it.image?.startsWith("data:")||it.image?.startsWith("http")
+                      ?<img src={it.image} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
+                      :it.image||"🛒"}
+                  </div>
+                  <span style={{ fontSize:12, color:C.muted }}>{it.name} ×{it.qty}</span>
+                </div>
+              ))}
+            </div>
           </div>
           <div style={{ background: C.bgDeep, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 13 }}>
@@ -1788,8 +1799,8 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                               <div style={{ display:"flex", alignItems:"center", gap:10, flex:1, minWidth:0 }}>
                                 {/* 品項圖片 */}
                                 <div style={{ width:40, height:40, borderRadius:8, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>
-                                  {it.image?.startsWith("data:")
-                                    ? <img src={it.image} alt={it.name} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                                  {it.image?.startsWith("data:")||it.image?.startsWith("http")
+                                    ? <img src={it.image} alt={it.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
                                     : it.image
                                       ? <span>{it.image}</span>
                                       : <span style={{ fontSize:16, color:C.faint }}>🛒</span>
@@ -2178,7 +2189,18 @@ function ArchivePage({ data, setData, toast }) {
                   {o.archived_at&&<span style={{ fontSize:11, color:C.faint }}>封存於 {new Date(o.archived_at).toLocaleDateString("zh-TW")}</span>}
                 </div>
                 <div style={{ fontWeight:600 }}>{o.customer_name||o.customerName}</div>
-                <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{(o.items||[]).map(it=>`${it.name} ×${it.qty}`).join("・")}</div>
+                <div style={{ marginTop:6, display:"flex", flexWrap:"wrap", gap:4 }}>
+                  {(o.items||[]).map((it,idx)=>(
+                    <div key={idx} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                      <div style={{ width:24, height:24, borderRadius:5, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>
+                        {it.image?.startsWith("data:")||it.image?.startsWith("http")
+                          ?<img src={it.image} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
+                          :it.image||"🛒"}
+                      </div>
+                      <span style={{ fontSize:11, color:C.muted }}>{it.name} ×{it.qty}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div style={{ textAlign:"right", flexShrink:0 }}>
                 <div style={{ fontWeight:700, color:C.accentDark }}>{fmtMoney(o.total)}</div>
