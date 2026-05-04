@@ -438,7 +438,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         showToast(`🔔 新訂單！${payload.new.customer_name} #${payload.new.no}`);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, payload => {
-        setData(d => ({ ...d, orders: d.orders.map(o => o.id === payload.new.id ? payload.new : o) }));
+        setData(d => ({ ...d, orders: d.orders.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o) }));
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "wishlist" }, payload => {
         setData(d => ({ ...d, wishlist: [payload.new, ...d.wishlist] }));
@@ -502,7 +502,6 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     { id: "catalog",       label: "賣場管理" },
     { id: "instock",       label: "🏪 現貨" },
     { id: "wishlist",      label: "許願清單" },
-    { id: "rate",          label: "匯率設定" },
     { id: "customers",     label: "客人管理" },
     { id: "archive",       label: "📦 封存" },
     { id: "settings",      label: "🔐 帳號設定" },
@@ -576,7 +575,6 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} />}
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
-        {tab === "rate"          && <RatePage          data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
         {tab === "archive"       && <ArchivePage data={data} setData={setData} toast={showToast} />}
@@ -1813,7 +1811,12 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                                   while (payments.length < o.items.length) payments.push(false);
                                   payments[i] = !payments[i];
                                   const { error } = await supabase.from("orders").update({ item_payments: payments }).eq("id", o.id);
-                                  if (!error) setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, item_payments: payments } : x) }));
+                                  if (!error) {
+                                    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, item_payments: payments } : x) }));
+                                  } else {
+                                    console.error("付款更新失敗", error);
+                                    alert("更新失敗，請稍後再試");
+                                  }
                                 }}
                                   style={{ fontSize:11, padding:"4px 10px", borderRadius:99, border:"none", cursor:"pointer", fontWeight:600, whiteSpace:"nowrap",
                                     background: isPaid ? C.green : C.bgDeep,
