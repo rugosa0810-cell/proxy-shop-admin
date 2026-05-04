@@ -234,23 +234,48 @@ const logAction = (action, detail = "") => {
 const loginLimiter = createRateLimiter(5, 5 * 60 * 1000);
 
 // ─── Export CSV ───────────────────────────────────────────────────
-function exportCSV(orders) {
-  const header = ["訂單號","客人","商品","數量","成本","售價","利潤","狀態","日期"];
-  const rows = orders.map(o => [
-    "#" + sanitize(o.no),
-    sanitize(o.customerName),
-    o.items.map(i => sanitize(i.name)).join("／"),
-    o.items.reduce((s,i)=>s+i.qty,0),
-    o.items.reduce((s,i)=>s+(i.cost||0)*i.qty,0),
-    o.total, o.profit,
-    ORDER_STATUS[o.status]?.label || o.status,
-    sanitize(o.createdAt),
-  ]);
-  const csv = [header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-  const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"});
+function exportCSV(orders, filename) {
+  const header = [
+    "訂單號","訂單日期","社群名稱","商品","規格","數量","成本","售價","利潤",
+    "國際運費","收款日期","出貨日期","付款方式","後五碼","是否已收款","狀態"
+  ];
+  // 每個品項分一行
+  const rows = [];
+  orders.forEach(o => {
+    const name = o.community_name || o.customer_name || o.customerName || "";
+    const date = o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : (o.createdAt || "");
+    const items = o.items || [];
+    if (items.length === 0) {
+      rows.push(["#"+sanitize(o.no), date, sanitize(name), "", "", 0, 0, o.total||0, o.profit||0, "", o.payment_date||"", o.ship_date||"", o.payment_method||"", o.bank_code||"", o.paid?"是":"否", ORDER_STATUS[o.status]?.label||o.status]);
+    } else {
+      items.forEach((it, idx) => {
+        rows.push([
+          idx === 0 ? "#"+sanitize(o.no) : "",
+          idx === 0 ? date : "",
+          idx === 0 ? sanitize(name) : "",
+          sanitize(it.name || ""),
+          sanitize(it.spec || it.note || ""),
+          it.qty || 1,
+          (it.cost || 0) * (it.qty || 1),
+          (it.price || 0) * (it.qty || 1),
+          ((it.price || 0) - (it.cost || 0)) * (it.qty || 1),
+          idx === 0 ? (o.shipping_fee || "") : "",
+          idx === 0 ? (o.payment_date || "") : "",
+          idx === 0 ? (o.ship_date || "") : "",
+          idx === 0 ? (o.payment_method || "") : "",
+          idx === 0 ? (o.bank_code || "") : "",
+          idx === 0 ? (o.paid ? "是" : "否") : "",
+          idx === 0 ? (ORDER_STATUS[o.status]?.label || o.status) : "",
+        ]);
+      });
+    }
+  });
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v||"").replace(/"/g, '""')}"`).join(",")).join("
+");
+  const blob = new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8;"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `訂單匯出_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
+  a.download = filename || `訂單匯出_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
   a.click();
   logAction("匯出CSV", `匯出 ${orders.length} 筆訂單`);
 }
@@ -478,9 +503,9 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     { id: "catalog",       label: "賣場管理" },
     { id: "instock",       label: "🏪 現貨" },
     { id: "wishlist",      label: "許願清單" },
-    { id: "announcements", label: "📢 公告管理" },
     { id: "rate",          label: "匯率設定" },
     { id: "customers",     label: "客人管理" },
+    { id: "archive",       label: "📦 封存" },
     { id: "settings",      label: "🔐 帳號設定" },
     { id: "auditlog",      label: "🛡️ 操作日誌" },
   ];
@@ -552,10 +577,10 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} />}
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
-        {tab === "announcements" && <AnnouncementsPage data={data} setData={setData} toast={showToast} />}
         {tab === "rate"          && <RatePage          data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
+        {tab === "archive"       && <ArchivePage data={data} setData={setData} toast={showToast} />}
         {tab === "auditlog"      && <AuditLogPage />}
       </div>
 
@@ -569,7 +594,8 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
   const [filter, setFilter] = useState(initialFilter);
   const [showAdd, setShowAdd] = useState(false);
   const STATUS_KEYS = ["all","pending_review","pending","bought","shipped","arrived","cancelled"];
-  const filtered = data.orders.filter(o => filter === "all" || o.status === filter);
+  const uniqueOrders = Array.from(new Map(data.orders.map(o => [o.id, o])).values());
+  const filtered = uniqueOrders.filter(o => !o.archived).filter(o => filter === "all" || o.status === filter);
 
   // 同步外部篩選（統計卡片點擊）
   useState(() => { setFilter(initialFilter); }, [initialFilter]);
@@ -646,8 +672,8 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
           <div style={{ padding: "13px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
               <div>
-                <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>#{o.no} · {o.customerName}</div>
-                <div style={{ fontWeight: 700 }}>{o.items[0]?.name}{o.items.length > 1 ? ` 等${o.items.length}件` : ""}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>#{o.no} · {o.customer_name || o.customerName}</div>
+                <div style={{ fontWeight: 700 }}>{(o.items||[])[0]?.name}{(o.items||[]).length > 1 ? ` 等${(o.items||[]).length}件` : ""}</div>
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <StatusBadge status={o.status} />
@@ -656,20 +682,36 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
                 </select>
               </div>
             </div>
-            <div style={{ fontSize: 12, color: C.muted }}>{o.items.map(it => `${it.name} ×${it.qty}${it.note?`（${it.note}）`:""}`).join("・")}</div>
+            <div style={{ fontSize: 12, color: C.muted }}>{(o.items||[]).map(it => `${it.name} ×${it.qty}${it.note?`（${it.note}）`:""}`).join("・")}</div>
           </div>
           <div style={{ background: C.bgDeep, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 13 }}>
-              <span style={{ color: C.muted }}>成本 {fmtMoney(o.items.reduce((s,it)=>s+(it.cost||0)*it.qty,0))}</span>
+              <span style={{ color: C.muted }}>成本 {fmtMoney((o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0))}</span>
               <span style={{ margin: "0 8px", color: C.faint }}>·</span>
               <span>售 {fmtMoney(o.total)}</span>
               <span style={{ margin: "0 8px", color: C.faint }}>·</span>
               <span style={{ color: C.green, fontWeight: 700 }}>↑ {fmtMoney(o.profit||0)}</span>
             </div>
-            <button onClick={() => del(o.id)} style={{ background: C.redBg, border: "none", color: C.red, width: 30, height: 30, borderRadius: 8, fontSize: 15, cursor: "pointer" }}>🗑</button>
+            <div style={{ display:"flex", gap:6 }}>
+              {o.status === "arrived" && (
+                <button onClick={async () => {
+                  if (!window.confirm(`確定封存訂單 #${o.no}？`)) return;
+                  const now = new Date().toISOString();
+                  const { error } = await supabase.from("orders").update({ archived: true, archived_at: now }).eq("id", o.id);
+                  if (!error) {
+                    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, archived: true, archived_at: now } : x) }));
+                    toast("已封存 📦");
+                  }
+                }} style={{ background:"#eaede8", border:"none", color:"#3d4a3e", padding:"0 10px", height:30, borderRadius:8, fontSize:11, cursor:"pointer", fontWeight:600 }}>📦 封存</button>
+              )}
+              <button onClick={() => del(o.id)} style={{ background: C.redBg, border: "none", color: C.red, width: 30, height: 30, borderRadius: 8, fontSize: 15, cursor: "pointer" }}>🗑</button>
+            </div>
           </div>
-          <div style={{ padding: "4px 14px 10px", fontSize: 11, color: C.muted }}>
-            {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : o.createdAt}
+          <div style={{ padding: "4px 14px 10px" }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
+              📅 {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : o.createdAt}
+            </div>
+            <PaymentFields order={o} setData={setData} />
           </div>
         </div>
       ))}
@@ -1262,6 +1304,8 @@ function WishlistPage({ data, setData, toast }) {
                 <div style={{ fontWeight: 700 }}>{w.name}</div>
                 <div style={{ fontSize: 13, color: C.muted }}>客人：{w.customer_name || w.customerName}</div>
                 {w.note && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>✏️ {w.note}</div>}
+                {w.link && <a href={w.link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: C.accent, display:"block", marginTop:4, wordBreak:"break-all" }}>🔗 {w.link}</a>}
+                {w.img_url && <img src={w.img_url} alt="參考圖" onError={e=>e.target.style.display="none"} style={{ width:"100%", maxHeight:140, objectFit:"cover", borderRadius:8, marginTop:8, border:`1px solid ${C.border}` }}/>}
               </div>
               <select value={w.status} onChange={e => updateStatus(w.id, e.target.value)}
                 style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
@@ -1501,17 +1545,25 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
   // ── 從訂單動態彙整客人清單 ──────────────────────────────────
   // 不依賴 data.customers，直接從 data.orders 聚合
   // key = customer_line_id（Supabase）或 customerId（本機）
+  const uniqueCustomerOrders = Array.from(new Map(data.orders.map(o => [o.id, o])).values());
   const customerMap = {};
-  data.orders.forEach(o => {
+  uniqueCustomerOrders.forEach(o => {
     const key   = o.customer_line_id || o.customerId || o.customerName;
     const name  = o.customer_name    || o.customerName || "未知";
     if (!customerMap[key]) {
+      const memberInfo = (data.members || []).find(m => m.line_user_id === key);
       customerMap[key] = {
-        id:     key,
+        id:            key,
         name,
-        lineId: o.customer_line_id || o.customerId || "",
-        note:   data.customerNotes?.[key] || "",
-        orders: [],
+        lineId:        o.customer_line_id || o.customerId || "",
+        communityName: memberInfo?.community_name || "",
+        phone:         memberInfo?.phone || "",
+        recipientName: memberInfo?.recipient_name || "",
+        igLink:        memberInfo?.ig_threads || "",
+        sevenStore:    memberInfo?.seven_store || "",
+        lineId2:       memberInfo?.line_id || "",
+        note:          data.customerNotes?.[key] || "",
+        orders:        [],
       };
     }
     customerMap[key].orders.push(o);
@@ -1892,15 +1944,28 @@ function MergeOrdersButton({ orders, customer, setData, toast }) {
   );
 }
 
+const DEFAULT_TEMPLATES = [
+  "您好！您的訂單已採購完成，請留意後續寄送通知 📦",
+  "您好！您的商品已從日本寄出，請稍候等待到台通知 ✈️",
+  "您好！您的商品已到台灣，我們會盡快安排出貨，請確認收件資訊 🎁",
+  "您好！您有一筆訂單待付款，請盡快完成付款，謝謝 💳",
+];
+
 function LineNotifyModal({ targets, onSend, onClose }) {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const TEMPLATES = [
-    "您好！您的訂單已採購完成，請留意後續寄送通知 📦",
-    "您好！您的商品已從日本寄出，請稍候等待到台通知 ✈️",
-    "您好！您的商品已到台灣，我們會盡快安排出貨，請確認收件資訊 🎁",
-    "您好！您有一筆訂單待付款，請盡快完成付款，謝謝 💳",
-  ];
+  const [templates, setTemplates] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("line_templates") || "null") || DEFAULT_TEMPLATES; }
+    catch { return DEFAULT_TEMPLATES; }
+  });
+  const [editingTpl, setEditingTpl] = useState(null);
+  const [tplInput, setTplInput] = useState("");
+
+  const saveTemplates = (t) => {
+    setTemplates(t);
+    try { localStorage.setItem("line_templates", JSON.stringify(t)); } catch {}
+  };
+
   const send = async () => {
     if (!message.trim()) return;
     setSending(true);
@@ -1909,6 +1974,7 @@ function LineNotifyModal({ targets, onSend, onClose }) {
     setSending(false);
     onClose();
   };
+
   return (
     <div style={{ position:"fixed", inset:0, zIndex:1000 }}>
       <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)", backdropFilter:"blur(4px)" }} onClick={onClose}/>
@@ -1926,13 +1992,26 @@ function LineNotifyModal({ targets, onSend, onClose }) {
           </div>
         </div>
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:12, color:"#888", marginBottom:8, fontWeight:600 }}>快速範本</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <div style={{ fontSize:12, color:"#888", fontWeight:600 }}>快速範本（可編輯）</div>
+            <button onClick={()=>{ setTemplates([...templates,"新範本"]); saveTemplates([...templates,"新範本"]); }}
+              style={{ fontSize:11, background:"#eaede8", border:"none", borderRadius:99, padding:"3px 10px", cursor:"pointer", color:"#3d4a3e" }}>+ 新增</button>
+          </div>
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-            {TEMPLATES.map((t,i)=>(
-              <button key={i} onClick={()=>setMessage(t)}
-                style={{ textAlign:"left", background:"#f5f3ef", border:"1.5px solid #e2dbd2", borderRadius:10, padding:"8px 12px", fontSize:12, color:"#4a4438", cursor:"pointer", lineHeight:1.5 }}>
-                {t}
-              </button>
+            {templates.map((t,i)=>(
+              <div key={i} style={{ display:"flex", gap:6 }}>
+                {editingTpl===i
+                  ?<div style={{ flex:1, display:"flex", gap:6 }}>
+                    <input value={tplInput} onChange={e=>setTplInput(e.target.value)} style={{ flex:1, background:"#f5f3ef", border:"1.5px solid #a0614a", borderRadius:8, padding:"6px 10px", fontSize:12, outline:"none" }}/>
+                    <button onClick={()=>{ const t2=[...templates];t2[i]=tplInput;saveTemplates(t2);setEditingTpl(null); }} style={{ background:"#a0614a", color:"#fff", border:"none", borderRadius:8, padding:"0 10px", fontSize:12, cursor:"pointer" }}>儲存</button>
+                    <button onClick={()=>setEditingTpl(null)} style={{ background:"#f5f3ef", border:"none", borderRadius:8, padding:"0 8px", fontSize:12, cursor:"pointer", color:"#888" }}>取消</button>
+                  </div>
+                  :<><button onClick={()=>setMessage(t)} style={{ flex:1, textAlign:"left", background:"#f5f3ef", border:"1.5px solid #e2dbd2", borderRadius:10, padding:"8px 12px", fontSize:12, color:"#4a4438", cursor:"pointer", lineHeight:1.5 }}>{t}</button>
+                    <button onClick={()=>{ setTplInput(t);setEditingTpl(i); }} style={{ background:"none", border:"1px solid #e2dbd2", borderRadius:8, padding:"0 8px", fontSize:12, cursor:"pointer", color:"#888" }}>✏️</button>
+                    <button onClick={()=>{ const t2=templates.filter((_,j)=>j!==i);saveTemplates(t2); }} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:"#ccc" }}>×</button>
+                  </>
+                }
+              </div>
             ))}
           </div>
         </div>
@@ -1953,6 +2032,163 @@ function LineNotifyModal({ targets, onSend, onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── 付款欄位元件 ────────────────────────────────────────────────
+function PaymentFields({ order: o, setData }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    payment_method: o.payment_method || "",
+    bank_code:      o.bank_code || "",
+    paid:           o.paid || false,
+    payment_date:   o.payment_date || "",
+    ship_date:      o.ship_date || "",
+    shipping_fee:   o.shipping_fee || "",
+  });
+
+  const save = async () => {
+    const { error } = await supabase.from("orders").update(form).eq("id", o.id);
+    if (!error) {
+      setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, ...form } : x) }));
+      setEditing(false);
+    }
+  };
+
+  if (!editing) return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+      {o.payment_method && <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:C.bgDeep, color:C.textMid }}>{o.payment_method === "transfer" ? "匯款" : "貨到付款"}{o.bank_code ? ` (${o.bank_code})` : ""}</span>}
+      {o.paid ? <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:C.greenBg, color:C.green, fontWeight:600 }}>✓ 已收款</span>
+              : <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:C.amberBg, color:C.amber }}>未收款</span>}
+      {o.payment_date && <span style={{ fontSize:11, color:C.muted }}>收款 {o.payment_date}</span>}
+      {o.ship_date && <span style={{ fontSize:11, color:C.muted }}>出貨 {o.ship_date}</span>}
+      {o.shipping_fee > 0 && <span style={{ fontSize:11, color:C.muted }}>運費 {fmtMoney(o.shipping_fee)}</span>}
+      <button onClick={() => { setForm({ payment_method:o.payment_method||"", bank_code:o.bank_code||"", paid:o.paid||false, payment_date:o.payment_date||"", ship_date:o.ship_date||"", shipping_fee:o.shipping_fee||"" }); setEditing(true); }}
+        style={{ fontSize:11, background:"none", border:`1px solid ${C.border}`, borderRadius:99, padding:"2px 10px", cursor:"pointer", color:C.muted }}>
+        ✏️ 編輯付款
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ background:C.bgDeep, borderRadius:10, padding:"12px", display:"flex", flexDirection:"column", gap:8 }}>
+      <div style={{ fontSize:12, fontWeight:600, color:C.textMid, marginBottom:2 }}>付款資訊</div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+        <div>
+          <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>付款方式</div>
+          <select value={form.payment_method} onChange={e => setForm(p => ({ ...p, payment_method: e.target.value, bank_code: e.target.value !== "transfer" ? "" : p.bank_code }))}
+            style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}>
+            <option value="">請選擇</option>
+            <option value="transfer">匯款</option>
+            <option value="cod">貨到付款</option>
+          </select>
+        </div>
+        {form.payment_method === "transfer" && (
+          <div>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>後五碼</div>
+            <input value={form.bank_code} onChange={e => setForm(p => ({ ...p, bank_code: e.target.value.slice(0,5) }))} placeholder="12345" maxLength={5}
+              style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+          </div>
+        )}
+        <div>
+          <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>收款日期</div>
+          <input type="date" value={form.payment_date} onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))}
+            style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>出貨日期</div>
+          <input type="date" value={form.ship_date} onChange={e => setForm(p => ({ ...p, ship_date: e.target.value }))}
+            style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>國際運費 NT$</div>
+          <input type="number" value={form.shipping_fee} onChange={e => setForm(p => ({ ...p, shipping_fee: Number(e.target.value) }))} placeholder="0"
+            style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, paddingTop:16 }}>
+          <input type="checkbox" id={`paid-${o.id}`} checked={form.paid} onChange={e => setForm(p => ({ ...p, paid: e.target.checked }))} style={{ width:16, height:16, accentColor:C.green }}/>
+          <label htmlFor={`paid-${o.id}`} style={{ fontSize:12, color:C.textMid, cursor:"pointer" }}>已收款</label>
+        </div>
+      </div>
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={save} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"7px 18px", fontSize:12, fontWeight:600, cursor:"pointer" }}>儲存</button>
+        <button onClick={() => setEditing(false)} style={{ background:C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 14px", fontSize:12, cursor:"pointer", color:C.muted }}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 封存頁面 ─────────────────────────────────────────────────────
+function ArchivePage({ data, setData, toast }) {
+  const [filter, setFilter] = useState("all");
+  const archived = Array.from(new Map(data.orders.map(o=>[o.id,o])).values()).filter(o => o.archived);
+  const filtered = archived.filter(o => filter === "all" || o.status === filter);
+
+  const unarchive = async (id) => {
+    const { error } = await supabase.from("orders").update({ archived: false, archived_at: null }).eq("id", id);
+    if (!error) { setData(d => ({ ...d, orders: d.orders.map(o => o.id === id ? { ...o, archived: false, archived_at: null } : o) })); toast("已取消封存"); }
+  };
+
+  const deleteOne = async (id) => {
+    if (!window.confirm("確定永久刪除？此操作無法復原。")) return;
+    const { error } = await supabase.from("orders").delete().eq("id", id);
+    if (!error) { setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) })); toast("已刪除"); }
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>📦 封存訂單（{archived.length} 筆）</div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={()=>{
+            if(!archived.length){toast("沒有封存訂單");return;}
+            exportCSV(archived, `封存訂單_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`);
+            toast("已匯出 📊");
+          }} style={{ background:C.green, color:"#fff", border:"none", borderRadius:99, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer" }}>📊 匯出</button>
+          {archived.length > 0 && (
+            <button onClick={async()=>{
+              if(!window.confirm(`確定永久刪除全部 ${archived.length} 筆？`))return;
+              const ids=archived.map(o=>o.id);
+              await supabase.from("orders").delete().in("id",ids);
+              setData(d=>({...d,orders:d.orders.filter(o=>!ids.includes(o.id))}));
+              toast("已全部清除");
+            }} style={{ background:C.redBg, color:C.red, border:`1px solid ${C.red}40`, borderRadius:99, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer" }}>全部刪除</button>
+          )}
+        </div>
+      </div>
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+        {["all",...Object.keys(ORDER_STATUS)].map(s=>{
+          const count=s==="all"?archived.length:archived.filter(o=>o.status===s).length;
+          if(count===0&&s!=="all")return null;
+          return <button key={s} onClick={()=>setFilter(s)} style={{ padding:"5px 12px", borderRadius:99, fontSize:11, fontWeight:600, cursor:"pointer", border:`1.5px solid ${filter===s?C.accent:C.border}`, background:filter===s?C.accentBg:"transparent", color:filter===s?C.accentDark:C.muted }}>{s==="all"?"全部":ORDER_STATUS[s]?.label}（{count}）</button>;
+        })}
+      </div>
+      {!filtered.length
+        ?<Card style={{ textAlign:"center", padding:"40px 0" }}><div style={{ fontSize:32, marginBottom:8 }}>📭</div><div style={{ color:C.muted }}>沒有封存訂單</div></Card>
+        :filtered.map(o=>(
+          <Card key={o.id} style={{ opacity:.9 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                  <span style={{ fontSize:12, color:C.muted }}>#{o.no}</span>
+                  <StatusBadge status={o.status}/>
+                  {o.archived_at&&<span style={{ fontSize:11, color:C.faint }}>封存於 {new Date(o.archived_at).toLocaleDateString("zh-TW")}</span>}
+                </div>
+                <div style={{ fontWeight:600 }}>{o.customer_name||o.customerName}</div>
+                <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{(o.items||[]).map(it=>`${it.name} ×${it.qty}`).join("・")}</div>
+              </div>
+              <div style={{ textAlign:"right", flexShrink:0 }}>
+                <div style={{ fontWeight:700, color:C.accentDark }}>{fmtMoney(o.total)}</div>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8, paddingTop:10, borderTop:`1px solid ${C.border}` }}>
+              <button onClick={()=>unarchive(o.id)} style={{ fontSize:12, background:C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", color:C.textMid }}>↩ 取消封存</button>
+              <button onClick={()=>deleteOne(o.id)} style={{ fontSize:12, background:C.redBg, border:"none", borderRadius:8, padding:"6px 14px", cursor:"pointer", color:C.red, fontWeight:600 }}>🗑 刪除</button>
+            </div>
+          </Card>
+        ))
+      }
     </div>
   );
 }
