@@ -253,8 +253,8 @@ function exportCSV(orders, filename) {
           idx === 0 ? "#"+sanitize(o.no) : "",
           idx === 0 ? date : "",
           idx === 0 ? sanitize(name) : "",
-          sanitize(it.name || ""),
-          sanitize(it.spec || it.note || ""),
+          (()=>{ const n=sanitize(it.name||""); const parts=n.split(" / "); return sanitize(parts[0]); })(),
+          (()=>{ const n=sanitize(it.name||""); const parts=n.split(" / "); return parts.slice(1).join(" / "); })(),
           it.qty || 1,
           (it.cost || 0) * (it.qty || 1),
           (it.price || 0) * (it.qty || 1),
@@ -1739,6 +1739,39 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                       <Btn sm variant="ghost" onClick={e => { e.stopPropagation(); setNoteInput(c.note||""); setEditingId(c.id); }}>✏️ 編輯</Btn>
                     </>
                   )}
+                </div>
+
+                {/* 客人個資 */}
+                <div style={{ margin:"0 18px 12px", padding:"12px 14px", background:C.bgDeep, borderRadius:10, fontSize:12, color:C.textMid }}>
+                  <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:8, letterSpacing:.5 }}>客人資料</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 16px" }}>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <span style={{ fontSize:10, color:C.faint }}>社群名稱</span>
+                      <span style={{ fontWeight:500, color:c.communityName?C.text:C.faint }}>{c.communityName||"未填寫"}</span>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <span style={{ fontSize:10, color:C.faint }}>收件人</span>
+                      <span style={{ fontWeight:500, color:c.recipientName?C.text:C.faint }}>{c.recipientName||"未填寫"}</span>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <span style={{ fontSize:10, color:C.faint }}>電話</span>
+                      <span style={{ fontWeight:500, color:c.phone?C.text:C.faint }}>{c.phone||"未填寫"}</span>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <span style={{ fontSize:10, color:C.faint }}>7-11 門市</span>
+                      <span style={{ color:c.sevenStore?C.text:C.faint }}>{c.sevenStore||"未填寫"}</span>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <span style={{ fontSize:10, color:C.faint }}>LINE ID</span>
+                      <span style={{ color:c.lineId2?C.text:C.faint }}>{c.lineId2||"未填寫"}</span>
+                    </div>
+                    {c.igLink && (
+                      <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                        <span style={{ fontSize:10, color:C.faint }}>IG / FB</span>
+                        <a href={c.igLink} target="_blank" rel="noreferrer" style={{ color:C.accent, wordBreak:"break-all", fontSize:11 }}>{c.igLink}</a>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* 狀態篩選列 */}
