@@ -2207,9 +2207,17 @@ function DispatchPage({ data, setData, toast }) {
   const getInput = (name) => stockInput[name] ?? "";
 
   const saveStock = (name) => {
-    const val = Math.max(0, Number(stockInput[name]) || 0);
-    setSavedStock(p => ({ ...p, [name]: val }));
-    toast(`已儲存「${name}」庫存 ${val} 個`);
+    const addVal = Math.max(0, Number(stockInput[name]) || 0);
+    if (addVal === 0) { toast("請輸入大於 0 的數量"); return; }
+    const newTotal = getStock(name) + addVal;
+    setSavedStock(p => ({ ...p, [name]: newTotal }));
+    setStockInput(p => ({ ...p, [name]: "" }));
+    toast(`+${addVal} 個，「${name}」庫存共 ${newTotal} 個`);
+  };
+
+  const resetStock = (name) => {
+    setSavedStock(p => ({ ...p, [name]: 0 }));
+    toast("庫存已清零");
   };
 
   // 計算分配：按下單順序分配庫存給客人
@@ -2321,16 +2329,39 @@ function DispatchPage({ data, setData, toast }) {
                   type="number"
                   value={getInput(item.name)}
                   onChange={e=>setStockInput(p=>({...p,[item.name]:e.target.value}))}
-                  placeholder={`需要 ${item.totalNeeded} 個`}
+                  placeholder="本次進貨數量"
                   style={{ width:"100%", background:C.surface, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"9px 12px", fontSize:14, outline:"none" }}
                   onFocus={e=>e.target.style.borderColor=C.accent}
                   onBlur={e=>e.target.style.borderColor=C.border}
                 />
               </div>
-              <button onClick={()=>saveStock(item.name)}
-                style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"9px 20px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>
-                儲存
-              </button>
+              <div style={{ display:"flex", gap:6 }}>
+                <button onClick={()=>saveStock(item.name)}
+                  style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"9px 16px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>
+                  + 加入庫存
+                </button>
+                {getStock(item.name)>0&&(
+                  <button onClick={()=>resetStock(item.name)}
+                    style={{ background:C.redBg, color:C.red, border:`1px solid ${C.red}30`, borderRadius:10, padding:"9px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
+                    清零
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 庫存統計 */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+              {[
+                { label:"需求總數", value:item.totalNeeded, color:C.textMid },
+                { label:"現有庫存", value:stock, color:stock>0?C.green:C.faint },
+                { label:"可配貨", value:totalAllocated, color:totalAllocated>0?C.accent:C.faint },
+                { label:"缺貨總數", value:totalShortage, color:totalShortage>0?C.red:C.green },
+              ].map(s=>(
+                <div key={s.label} style={{ background:C.bgDeep, borderRadius:10, padding:"10px 12px" }}>
+                  <div style={{ fontSize:10, color:C.muted, marginBottom:3 }}>{s.label}</div>
+                  <div style={{ fontSize:18, fontWeight:700, color:s.color }}>{s.value}<span style={{ fontSize:11, fontWeight:400, color:C.muted, marginLeft:2 }}>個</span></div>
+                </div>
+              ))}
             </div>
 
             {/* 進度條 */}
