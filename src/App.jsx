@@ -875,10 +875,12 @@ function AddOrderModal({ data, setData, onClose, toast }) {
 
 function ReviewPage({ data, setData, toast }) {
   const pending = data.orders.filter(o => o.status === "pending_review");
-  const approve = id => {
+  const approve = async id => {
     const o = data.orders.find(x => x.id === id);
+    const { error } = await supabase.from("orders").update({ status: "pending" }).eq("id", id);
+    if (error) { toast("更新失敗"); return; }
     setData(d => ({ ...d, orders: d.orders.map(o => o.id===id?{...o,status:"pending"}:o) }));
-    logAction("審核通過", `訂單 #${o?.no} · ${o?.customerName}`);
+    logAction("審核通過", `訂單 #${o?.no} · ${o?.customer_name||o?.customerName}`);
     toast("已審核通過 ✅");
   };
   const reject = async id => {
