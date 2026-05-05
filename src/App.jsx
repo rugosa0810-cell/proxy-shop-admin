@@ -2169,11 +2169,11 @@ function PaymentFields({ order: o, setData }) {
 
 // ─── 封存頁面 ─────────────────────────────────────────────────────
 // ─── 配貨頁面 ────────────────────────────────────────────────────
+// ─── 配貨頁面（重新設計）────────────────────────────────────────
 function DispatchPage({ data, setData, toast }) {
-  const [stockInput, setStockInput] = useState({}); // { "商品名稱": 庫存數量 }
-  const [savedStock, setSavedStock] = useState({}); // 已儲存的庫存
+  const [dispatching, setDispatching] = useState({});
 
-  // 只看待採購和已採購的訂單
+  // 只看待採購、已採購、待審核的訂單，按下單時間排序（先下先配）
   const activeOrders = Array.from(new Map(data.orders.map(o=>[o.id,o])).values())
     .filter(o => ["pending","bought","pending_review"].includes(o.status) && !o.archived)
     .sort((a,b) => new Date(a.created_at||a.createdAt) - new Date(b.created_at||b.createdAt));
@@ -2184,19 +2184,14 @@ function DispatchPage({ data, setData, toast }) {
     (o.items||[]).forEach(it => {
       const key = it.name;
       if (!itemMap[key]) {
-        itemMap[key] = {
-          name: key,
-          image: it.image || "",
-          totalNeeded: 0,
-          orders: [], // [{orderId, orderNo, customerName, qty, date}]
-        };
+        itemMap[key] = { name: key, image: it.image||"", totalNeeded:0, orders:[] };
       }
-      itemMap[key].totalNeeded += (it.qty || 1);
+      itemMap[key].totalNeeded += (it.qty||1);
       itemMap[key].orders.push({
         orderId: o.id,
         orderNo: o.no,
-        customerName: o.customer_name || o.customerName || "未知",
-        qty: it.qty || 1,
+        customerName: o.customer_name||o.customerName||"未知",
+        qty: it.qty||1,
         date: o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : "",
         status: o.status,
       });
@@ -2205,45 +2200,28 @@ function DispatchPage({ data, setData, toast }) {
 
   const allItems = Object.values(itemMap).sort((a,b) => b.totalNeeded - a.totalNeeded);
 
-  const getStock = (name) => savedStock[name] ?? 0;
-  const getInput = (name) => stockInput[name] ?? "";
-
-  const saveStock = (name) => {
-    const addVal = Math.max(0, Number(stockInput[name]) || 0);
-    if (addVal === 0) { toast("請輸入大於 0 的數量"); return; }
-    const newTotal = getStock(name) + addVal;
-    setSavedStock(p => ({ ...p, [name]: newTotal }));
-    setStockInput(p => ({ ...p, [name]: "" }));
-    toast(`+${addVal} 個，「${name}」庫存共 ${newTotal} 個`);
+  // 配貨：把訂單狀態改成「已採購」
+  const dispatchOrder = async (orderId, orderNo) => {
+    setDispatching(p => ({ ...p, [orderId]: true }));
+    const { error } = await supabase.from("orders").update({ status: "bought" }).eq("id", orderId);
+    if (error) {
+      toast("配貨失敗，請稍後再試");
+    } else {
+      setData(d => ({ ...d, orders: d.orders.map(o => o.id===orderId ? {...o, status:"bought"} : o) }));
+      toast(`✅ #${orderNo} 已配貨，客人狀態更新為已採購`);
+    }
+    setDispatching(p => ({ ...p, [orderId]: false }));
   };
 
-  const resetStock = (name) => {
-    setSavedStock(p => ({ ...p, [name]: 0 }));
-    toast("庫存已清零");
-  };
-
-  // 計算分配：按下單順序分配庫存給客人
-  const calcDispatch = (item) => {
-    const stock = getStock(item.name);
-    let remaining = stock;
-    return item.orders.map(o => {
-      const allocated = Math.min(remaining, o.qty);
-      remaining -= allocated;
-      const shortage = o.qty - allocated;
-      return { ...o, allocated, shortage };
-    });
-  };
-
-  // 匯出配貨單 CSV
+  // 匯出配貨單
   const exportDispatch = () => {
-    const header = ["商品","客人","下單日期","需求數量","分配數量","缺貨數量","訂單狀態","訂單號"];
+    const header = ["商品","客人","下單日期","需求數量","訂單狀態","訂單號"];
     const rows = [];
     allItems.forEach(item => {
-      const dispatched = calcDispatch(item);
-      dispatched.forEach((o, idx) => {
+      item.orders.forEach((o, idx) => {
         rows.push([
           idx===0 ? item.name : "",
-          o.customerName, o.date, o.qty, o.allocated, o.shortage,
+          o.customerName, o.date, o.qty,
           ORDER_STATUS[o.status]?.label||o.status, "#"+o.orderNo
         ]);
       });
@@ -2262,18 +2240,17 @@ function DispatchPage({ data, setData, toast }) {
       <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>🚚 配貨模式</div>
       <Card style={{ textAlign:"center", padding:"48px 0" }}>
         <div style={{ fontSize:36, marginBottom:8 }}>📭</div>
-        <div style={{ color:C.muted }}>目前沒有待採購的訂單</div>
+        <div style={{ color:C.muted }}>目前沒有待配貨的訂單</div>
       </Card>
     </div>
   );
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-      {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
           <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>🚚 配貨模式</div>
-          <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>共 {allItems.length} 種商品 · {activeOrders.length} 筆訂單</div>
+          <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>共 {allItems.length} 種商品 · {activeOrders.length} 筆訂單 · 按下單順序排列</div>
         </div>
         <button onClick={exportDispatch}
           style={{ background:C.green, color:"#fff", border:"none", borderRadius:99, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
@@ -2281,138 +2258,67 @@ function DispatchPage({ data, setData, toast }) {
         </button>
       </div>
 
-      {/* 說明 */}
       <div style={{ background:C.amberBg, borderRadius:12, padding:"10px 14px", fontSize:12, color:C.amber, border:`1px solid ${C.amber}30` }}>
-        💡 填入實際採購庫存數量，系統依下單順序自動分配給客人
+        💡 點「配貨」按鈕後，客人訂單狀態會自動更新為「已採購」
       </div>
 
-      {/* 每個商品的配貨卡片 */}
-      {allItems.map((item, ii) => {
-        const stock = getStock(item.name);
-        const dispatched = calcDispatch(item);
-        const totalAllocated = dispatched.reduce((s,o)=>s+o.allocated,0);
-        const totalShortage = dispatched.reduce((s,o)=>s+o.shortage,0);
-        const isFull = stock >= item.totalNeeded;
+      {allItems.map((item) => (
+        <Card key={item.name} style={{ overflow:"hidden" }}>
+          {/* 商品 header */}
+          <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
+            <div style={{ width:48, height:48, borderRadius:10, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24 }}>
+              {item.image?.startsWith("data:")||item.image?.startsWith("http")
+                ?<img src={item.image} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
+                :item.image||"🛒"}
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:700, fontSize:14 }}>{item.name}</div>
+              <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
+                共需 <span style={{ fontWeight:700, color:C.accentDark }}>{item.totalNeeded}</span> 個 ·
+                {` ${item.orders.filter(o=>o.status==="bought").length}`} 筆已配 ·
+                {` ${item.orders.filter(o=>o.status!=="bought").length}`} 筆待配
+              </div>
+            </div>
+          </div>
 
-        return (
-          <Card key={item.name} style={{ overflow:"hidden" }}>
-            {/* 商品 header */}
-            <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
-              <div style={{ width:48, height:48, borderRadius:10, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24 }}>
-                {item.image?.startsWith("data:")||item.image?.startsWith("http")
-                  ?<img src={item.image} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
-                  :item.image||"🛒"}
-              </div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontWeight:700, fontSize:14, color:C.text }}>{item.name}</div>
-                <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
-                  共需 <span style={{ fontWeight:700, color:C.accentDark }}>{item.totalNeeded}</span> 個
-                  {stock>0&&<span style={{ marginLeft:8 }}>· 庫存 <span style={{ fontWeight:700, color:isFull?C.green:C.amber }}>{stock}</span> 個</span>}
-                  {totalShortage>0&&<span style={{ marginLeft:8, color:C.red }}>· 缺 {totalShortage} 個</span>}
-                </div>
-              </div>
-              {/* 庫存狀態標籤 */}
-              {stock>0&&(
-                <span style={{ fontSize:11, padding:"3px 10px", borderRadius:99, fontWeight:600,
-                  background:isFull?C.greenBg:C.amberBg,
-                  color:isFull?C.green:C.amber,
-                  border:`1px solid ${isFull?C.green:C.amber}30`
+          {/* 按下單順序條列客人 */}
+          <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+            <div style={{ fontSize:11, color:C.muted, fontWeight:600, letterSpacing:.3, marginBottom:4 }}>按下單順序配貨</div>
+            {item.orders.map((o, idx) => {
+              const isDone = o.status === "bought" || o.status === "shipped" || o.status === "arrived";
+              const isLoading = dispatching[o.orderId];
+              return (
+                <div key={o.orderId+idx} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px", borderRadius:10,
+                  background: isDone ? C.greenBg : C.bgDeep,
+                  border:`1px solid ${isDone ? C.green+"30" : C.border}`
                 }}>
-                  {isFull?"庫存充足":"庫存不足"}
-                </span>
-              )}
-            </div>
-
-            {/* 填入庫存 */}
-            <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"flex-end" }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>實際採購數量</div>
-                <input
-                  type="number"
-                  value={getInput(item.name)}
-                  onChange={e=>setStockInput(p=>({...p,[item.name]:e.target.value}))}
-                  placeholder="本次進貨數量"
-                  style={{ width:"100%", background:C.surface, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"9px 12px", fontSize:14, outline:"none" }}
-                  onFocus={e=>e.target.style.borderColor=C.accent}
-                  onBlur={e=>e.target.style.borderColor=C.border}
-                />
-              </div>
-              <div style={{ display:"flex", gap:6 }}>
-                <button onClick={()=>saveStock(item.name)}
-                  style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"9px 16px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>
-                  + 加入庫存
-                </button>
-                {getStock(item.name)>0&&(
-                  <button onClick={()=>resetStock(item.name)}
-                    style={{ background:C.redBg, color:C.red, border:`1px solid ${C.red}30`, borderRadius:10, padding:"9px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
-                    清零
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* 庫存統計 */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
-              {[
-                { label:"需求總數", value:item.totalNeeded, color:C.textMid },
-                { label:"現有庫存", value:stock, color:stock>0?C.green:C.faint },
-                { label:"可配貨", value:totalAllocated, color:totalAllocated>0?C.accent:C.faint },
-                { label:"缺貨總數", value:totalShortage, color:totalShortage>0?C.red:C.green },
-              ].map(s=>(
-                <div key={s.label} style={{ background:C.bgDeep, borderRadius:10, padding:"10px 12px" }}>
-                  <div style={{ fontSize:10, color:C.muted, marginBottom:3 }}>{s.label}</div>
-                  <div style={{ fontSize:18, fontWeight:700, color:s.color }}>{s.value}<span style={{ fontSize:11, fontWeight:400, color:C.muted, marginLeft:2 }}>個</span></div>
-                </div>
-              ))}
-            </div>
-
-            {/* 進度條 */}
-            {stock > 0 && (
-              <div style={{ marginBottom:14 }}>
-                <div style={{ height:6, background:C.bgDeep, borderRadius:99, overflow:"hidden" }}>
-                  <div style={{ height:"100%", width:`${Math.min(100, (stock/item.totalNeeded)*100)}%`, background:isFull?C.green:C.amber, borderRadius:99, transition:"width .4s" }}/>
-                </div>
-                <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:C.muted, marginTop:3 }}>
-                  <span>0</span>
-                  <span>{item.totalNeeded} 個（目標）</span>
-                </div>
-              </div>
-            )}
-
-            {/* 分配給客人（按下單順序） */}
-            <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:12 }}>
-              <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:8, letterSpacing:.3 }}>按下單順序分配</div>
-              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                {dispatched.map((o, idx) => (
-                  <div key={o.orderId+idx} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:10,
-                    background: o.shortage>0 ? C.redBg : o.allocated>0 ? C.greenBg : C.bgDeep,
-                    border: `1px solid ${o.shortage>0?C.red+"30":o.allocated>0?C.green+"30":C.border}`
-                  }}>
-                    <div style={{ width:22, height:22, borderRadius:"50%", background:C.accent, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, flexShrink:0 }}>
-                      {idx+1}
-                    </div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:12, fontWeight:600, color:C.text }}>{o.customerName}</div>
-                      <div style={{ fontSize:10, color:C.muted }}>#{o.orderNo} · {o.date}</div>
-                    </div>
-                    <div style={{ textAlign:"right", fontSize:12, flexShrink:0 }}>
-                      <div style={{ color:C.muted }}>需要 {o.qty} 個</div>
-                      {stock>0&&(
-                        <div style={{ fontWeight:700, color:o.shortage>0?C.red:C.green }}>
-                          {o.shortage>0
-                            ? `分配 ${o.allocated} · 缺 ${o.shortage}`
-                            : `✓ 分配 ${o.allocated}`
-                          }
-                        </div>
-                      )}
-                    </div>
+                  {/* 順序號 */}
+                  <div style={{ width:24, height:24, borderRadius:"50%", background:isDone?C.green:C.accent, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, flexShrink:0 }}>
+                    {idx+1}
                   </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-        );
-      })}
+                  {/* 客人資訊 */}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:C.text }}>{o.customerName}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>#{o.orderNo} · {o.date} · ×{o.qty} 個</div>
+                  </div>
+                  {/* 狀態 / 配貨按鈕 */}
+                  {isDone
+                    ? <span style={{ fontSize:11, padding:"4px 12px", borderRadius:99, background:C.greenBg, color:C.green, fontWeight:600, border:`1px solid ${C.green}30` }}>
+                        ✓ {ORDER_STATUS[o.status]?.label}
+                      </span>
+                    : <button
+                        onClick={() => dispatchOrder(o.orderId, o.orderNo)}
+                        disabled={isLoading}
+                        style={{ fontSize:12, padding:"6px 16px", borderRadius:99, background:isLoading?C.faint:C.accent, color:"#fff", border:"none", cursor:isLoading?"not-allowed":"pointer", fontWeight:600, whiteSpace:"nowrap" }}>
+                        {isLoading ? "配貨中..." : "✓ 配貨"}
+                      </button>
+                  }
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ))}
     </div>
   );
 }
