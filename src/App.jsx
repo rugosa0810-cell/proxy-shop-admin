@@ -262,7 +262,7 @@ function exportCSV(orders, filename) {
           idx === 0 ? (o.shipping_fee || "") : "",
           idx === 0 ? (o.payment_date || "") : "",
           idx === 0 ? (o.ship_date || "") : "",
-          idx === 0 ? (o.payment_method || "") : "",
+          idx === 0 ? (o.payment_method === "transfer" ? "匯款" : o.payment_method === "cod" ? "貨到付款" : "") : "",
           idx === 0 ? (o.bank_code || "") : "",
           idx === 0 ? (o.paid ? "是" : "否") : "",
           idx === 0 ? (ORDER_STATUS[o.status]?.label || o.status) : "",
@@ -1001,7 +1001,6 @@ function ProductModal({ product, onSave, onClose }) {
   const [vName, setVName]       = useState("");
   const [vPrice, setVPrice]     = useState("");
   const [vCost, setVCost]       = useState("");
-  const [imgMode, setImgMode]   = useState(product?.image?.startsWith("data:") ? "file" : "emoji");
   const [uploading, setUploading] = useState(false);
 
   const handleImageFile = (e) => {
@@ -1034,7 +1033,7 @@ function ProductModal({ product, onSave, onClose }) {
       category: sanitize(cat, 50),
       price: Math.max(0, Number(price)||0),
       cost: Math.max(0, Number(cost)||0),   // 成本：只在後台使用，不傳客人端
-      image: imgMode === "emoji" ? sanitize(image, 10) : image,
+      image: image,
       status: product?.status || "on",
       variants,
     });
@@ -1059,11 +1058,10 @@ function ProductModal({ product, onSave, onClose }) {
         <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
           <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>商品圖片</div>
           <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-            <button onClick={()=>setImgMode("emoji")} style={{ padding:"6px 14px", borderRadius:8, border:`1.5px solid ${imgMode==="emoji"?C.accent:C.border}`, background:imgMode==="emoji"?C.accentBg:"transparent", color:imgMode==="emoji"?C.accentDark:C.muted, cursor:"pointer", fontSize:12, fontWeight:600 }}>Emoji 圖示</button>
-            <button onClick={()=>setImgMode("file")} style={{ padding:"6px 14px", borderRadius:8, border:`1.5px solid ${imgMode==="file"?C.accent:C.border}`, background:imgMode==="file"?C.accentBg:"transparent", color:imgMode==="file"?C.accentDark:C.muted, cursor:"pointer", fontSize:12, fontWeight:600 }}>上傳圖片</button>
+
           </div>
 
-          {imgMode === "emoji" ? (
+          {false ? (
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
               <Input label="Emoji 圖示" value={image} onChange={v => setImage(v.slice(0,4))} placeholder="💊 🎀 🛍" style={{ flex:1 }} />
               <div style={{ width:56, height:56, background:C.bgDeep, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, border:`1.5px solid ${C.border}`, flexShrink:0 }}>
