@@ -2267,9 +2267,8 @@ function DispatchPage({ data, setData, toast }) {
         ]);
       });
     });
-    const csv = [header,...rows].map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("
-");
-    const blob = new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+    const csv = [header,...rows].map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
     a.download = `配貨單_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
     a.click(); toast("配貨單已匯出 📊");
