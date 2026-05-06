@@ -546,7 +546,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {[
           { icon: "📋", val: totalOrders,  label: "總訂單",   filter: "all",     color: C.text   },
           { icon: "⏳", val: pendingBuy,   label: "待購買",   filter: "pending", color: C.orange },
-          { icon: "✅", val: bought,       label: "已買到",   filter: "bought",  color: C.green  },
+          { icon: "✅", val: bought,       label: "已採買",   filter: "bought",  color: C.green  },
           { icon: "💰", val: `NT$${profit.toLocaleString()}`, label: "預估利潤", filter: null, color: C.accent },
         ].map((s, i) => {
           const isActive = s.filter && tab === "orders" && orderFilter === s.filter;
