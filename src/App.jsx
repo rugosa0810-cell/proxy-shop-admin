@@ -2307,8 +2307,8 @@ function DispatchPage({ data, setData, toast }) {
         const stock = getStock(item.name);
         const dispatchedCount = item.orders.filter(o=>o.isDispatched).reduce((s,o)=>s+o.qty,0);
         const undispatchedCount = item.orders.filter(o=>!o.isDispatched).reduce((s,o)=>s+o.qty,0);
-        const canDispatch = Math.min(stock, undispatchedCount);
-        const shortage = Math.max(0, undispatchedCount - stock);
+        const remainingStock = Math.max(0, stock - dispatchedCount);
+        const shortage = Math.max(0, undispatchedCount - remainingStock);
 
         return (
           <Card key={item.name} style={{ overflow:"hidden" }}>
@@ -2328,15 +2328,15 @@ function DispatchPage({ data, setData, toast }) {
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
               {[
                 { label:"需求總數", value:item.totalNeeded, color:C.textMid },
-                { label:"現有庫存", value:stock, color:stock>0?C.green:C.faint },
+                { label:"現有庫存", value:remainingStock, sub:`（已入庫 ${stock} 個）`, color:remainingStock>0?C.green:C.faint },
                 { label:"已配貨", value:dispatchedCount, color:dispatchedCount>0?C.accent:C.faint },
                 { label:"未配貨", value:undispatchedCount, color:undispatchedCount>0?C.amber:C.green },
-                { label:"可配貨", value:canDispatch, color:canDispatch>0?C.accent:C.faint },
                 { label:"缺貨總數", value:shortage, color:shortage>0?C.red:C.green },
               ].map(s=>(
                 <div key={s.label} style={{ background:C.bgDeep, borderRadius:10, padding:"8px 12px" }}>
                   <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>{s.label}</div>
                   <div style={{ fontSize:17, fontWeight:700, color:s.color }}>{s.value}<span style={{ fontSize:11, fontWeight:400, color:C.muted, marginLeft:2 }}>個</span></div>
+                  {s.sub&&<div style={{ fontSize:10, color:C.faint, marginTop:1 }}>{s.sub}</div>}
                 </div>
               ))}
             </div>
@@ -2347,7 +2347,10 @@ function DispatchPage({ data, setData, toast }) {
                 <div style={{ height:5, background:C.bgDeep, borderRadius:99, overflow:"hidden" }}>
                   <div style={{ height:"100%", width:`${Math.min(100,(dispatchedCount/item.totalNeeded)*100)}%`, background:C.green, borderRadius:99, transition:"width .4s" }}/>
                 </div>
-                <div style={{ fontSize:10, color:C.muted, marginTop:3, textAlign:"right" }}>已配 {dispatchedCount}/{item.totalNeeded}</div>
+                <div style={{ fontSize:10, color:C.muted, marginTop:3, textAlign:"right" }}>
+                  已配 {dispatchedCount} / 需求 {item.totalNeeded}
+                  {shortage>0&&<span style={{ color:C.red, marginLeft:6 }}>缺 {shortage} 個</span>}
+                </div>
               </div>
             )}
 
