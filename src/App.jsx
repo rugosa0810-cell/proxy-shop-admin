@@ -275,13 +275,14 @@ function exportCSV(orders, filename) {
       });
     }
   });
-  const csv = [header, ...rows].map(r => r.map(v => `"${String(v||"").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const q = '"';
+  const csv = [header, ...rows].map(r => r.map(v => (q+String(v||"").replace(new RegExp(q,"g"),q+q)+q)).join(",")).join("\n");
   const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename || `訂單匯出_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
+  a.download = filename || ("訂單匯出_"+new Date().toLocaleDateString("zh-TW").replace(/\/g,"-")+".csv");
   a.click();
-  logAction("匯出CSV", `匯出 ${orders.length} 筆訂單`);
+  logAction("匯出CSV", "匯出 "+orders.length+" 筆訂單");
 }
 
 // ─── Login ────────────────────────────────────────────────────────
@@ -2600,12 +2601,11 @@ function ClosedPage({ data, setData, toast }) {
         ]);
       });
     });
-    const csv = [header,...rows].map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("
-");
-    const blob = new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+    const NL = "\n"; const q = '"'; 
+    const csv = [header,...rows].map(r=>r.map(v=>(q+String(v||"").replace(new RegExp(q,"g"),q+q)+q)).join(",")).join(NL);
+    const blob = new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
     const a = document.createElement("a"); a.href=URL.createObjectURL(blob);
-    a.download=`結案訂單_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
-    a.click(); toast("已匯出 📊");
+    a.download="結案訂單_"+new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")+".csv";
   };
 
   return (
