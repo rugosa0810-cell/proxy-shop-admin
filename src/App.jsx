@@ -280,7 +280,7 @@ function exportCSV(orders, filename) {
   const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename || ("訂單匯出_"+new Date().toLocaleDateString("zh-TW").replace(/\/g,"-")+".csv");
+  a.download = filename || ("訂單匯出_"+new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")+".csv");
   a.click();
   logAction("匯出CSV", "匯出 "+orders.length+" 筆訂單");
 }
