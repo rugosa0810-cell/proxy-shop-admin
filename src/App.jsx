@@ -38,13 +38,18 @@ const C = {
 };
 
 const ORDER_STATUS = {
-  pending_review: { label: "待審核", color: C.blue,   bg: C.blueBg,   icon: "📋" },
-  pending:        { label: "待購買", color: C.orange,  bg: C.orangeBg, icon: "⏳" },
-  bought:         { label: "已買到", color: C.green,   bg: C.greenBg,  icon: "✅" },
-  shipped:        { label: "已寄出", color: C.purple,  bg: C.purpleBg, icon: "🚚" },
-  arrived:        { label: "已到台灣",color: C.accent, bg: C.accentBg, icon: "📦" },
-  cancelled:      { label: "已取消", color: C.red,     bg: C.redBg,    icon: "❌" },
+  unpaid:    { label: "未付款",  color: C.blue,   bg: C.blueBg,   icon: "💳", next: "paid" },
+  paid:      { label: "已付款",  color: C.green,  bg: C.greenBg,  icon: "✅", next: "pending" },
+  pending:   { label: "待採買",  color: C.amber,  bg: C.amberBg,  icon: "🛒", next: "bought" },
+  bought:    { label: "採買中",  color: C.purple, bg: C.purpleBg, icon: "🏪", next: "arrived" },
+  arrived:   { label: "已到台",  color: C.accent, bg: C.accentBg, icon: "📦", next: "shipped" },
+  shipped:   { label: "已寄出",  color: C.green,  bg: C.greenBg,  icon: "🚚", next: "closed" },
+  closed:    { label: "結案",    color: C.muted,  bg: C.bgDeep,   icon: "🎉", next: null },
+  cancelled: { label: "已取消",  color: C.red,    bg: C.redBg,    icon: "❌", next: null },
 };
+
+// 流程步驟（不含取消/結案）
+const ERP_STEPS = ["unpaid","paid","pending","bought","arrived","shipped","closed"];
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmtMoney = (n) => `NT$${Number(n || 0).toLocaleString()}`;
@@ -497,8 +502,9 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
   };
 
   const TABS = [
-    { id: "orders",        label: "訂單管理" },
-    { id: "review",        label: "審核" },
+    { id: "erp",           label: "📋 訂單流程" },
+    { id: "report",        label: "📊 統計報表" },
+    { id: "closed",        label: "🎉 結案區" },
     { id: "catalog",       label: "賣場管理" },
     { id: "instock",       label: "🏪 現貨" },
     { id: "wishlist",      label: "許願清單" },
@@ -2249,6 +2255,413 @@ function ArchivePage({ data, setData, toast }) {
           </Card>
         ))
       }
+    </div>
+  );
+}
+
+// ─── ERP 訂單流程頁 ──────────────────────────────────────────────
+function ERPPage({ data, setData, toast }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [deleting, setDeleting] = useState({});
+  const [advancing, setAdvancing] = useState({});
+
+  const uniqueOrders = Array.from(new Map(data.orders.map(o=>[o.id,o])).values())
+    .filter(o => o.status !== "closed" && !o.archived);
+
+  const filtered = uniqueOrders
+    .filter(o => filter === "all" || o.status === filter)
+    .filter(o => !search || (o.customer_name||o.customerName||"").includes(search) || (o.no||"").includes(search))
+    .sort((a,b) => new Date(b.created_at||b.createdAt) - new Date(a.created_at||a.createdAt));
+
+  // 推進到下一個狀態
+  const advance = async (o) => {
+    const next = ORDER_STATUS[o.status]?.next;
+    if (!next) return;
+    setAdvancing(p => ({...p, [o.id]: true}));
+    const updateData = { status: next };
+    if (next === "closed") { updateData.closed_at = new Date().toISOString(); }
+    const { error } = await supabase.from("orders").update(updateData).eq("id", o.id);
+    if (!error) {
+      setData(d => ({ ...d, orders: d.orders.map(x => x.id===o.id ? {...x,...updateData} : x) }));
+      if (next === "closed") toast(`🎉 #${o.no} 已結案`);
+      else toast(`✅ #${o.no} → ${ORDER_STATUS[next]?.label}`);
+    } else { toast("更新失敗"); }
+    setAdvancing(p => ({...p, [o.id]: false}));
+  };
+
+  // 更新狀態（下拉）
+  const updateStatus = async (o, status) => {
+    const updateData = { status };
+    if (status === "closed") updateData.closed_at = new Date().toISOString();
+    const { error } = await supabase.from("orders").update(updateData).eq("id", o.id);
+    if (!error) setData(d => ({ ...d, orders: d.orders.map(x => x.id===o.id ? {...x,...updateData} : x) }));
+    else toast("更新失敗");
+  };
+
+  // 刪除訂單
+  const deleteOrder = async (o) => {
+    if (!window.confirm(`確定刪除訂單 #${o.no}？此操作無法復原。`)) return;
+    setDeleting(p => ({...p, [o.id]: true}));
+    const { error } = await supabase.from("orders").delete().eq("id", o.id);
+    if (!error) { setData(d => ({ ...d, orders: d.orders.filter(x => x.id !== o.id) })); toast("已刪除"); }
+    else { toast("刪除失敗"); setDeleting(p => ({...p, [o.id]: false})); }
+  };
+
+  const statusCounts = Object.keys(ORDER_STATUS).reduce((acc, s) => {
+    acc[s] = uniqueOrders.filter(o => o.status === s).length;
+    return acc;
+  }, {});
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>📋 訂單流程管理</div>
+
+      {/* ERP 流程進度總覽 */}
+      <div style={{ display:"flex", gap:0, overflowX:"auto", scrollbarWidth:"none" }}>
+        {ERP_STEPS.map((s, i) => {
+          const st = ORDER_STATUS[s];
+          const count = statusCounts[s] || 0;
+          return (
+            <div key={s} style={{ display:"flex", alignItems:"center" }}>
+              <button onClick={() => setFilter(s)}
+                style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 12px", background: filter===s ? C.accentBg : C.bgDeep, border:`1.5px solid ${filter===s ? C.accent : C.border}`, borderRadius:10, cursor:"pointer", minWidth:70 }}>
+                <span style={{ fontSize:18 }}>{st.icon}</span>
+                <span style={{ fontSize:10, color: filter===s ? C.accent : C.muted, fontWeight: filter===s ? 600 : 400, whiteSpace:"nowrap" }}>{st.label}</span>
+                <span style={{ fontSize:12, fontWeight:700, color: count>0 ? C.accentDark : C.faint }}>{count}</span>
+              </button>
+              {i < ERP_STEPS.length-1 && <div style={{ fontSize:14, color:C.faint, margin:"0 2px" }}>›</div>}
+            </div>
+          );
+        })}
+        <button onClick={() => setFilter("all")}
+          style={{ marginLeft:8, padding:"8px 14px", background: filter==="all" ? C.accentBg : "transparent", border:`1.5px solid ${filter==="all" ? C.accent : C.border}`, borderRadius:10, cursor:"pointer", fontSize:12, color: filter==="all" ? C.accent : C.muted, fontWeight: filter==="all" ? 600 : 400 }}>
+          全部 ({uniqueOrders.length})
+        </button>
+      </div>
+
+      {/* 搜尋 */}
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜尋客人名稱或訂單號..."
+        style={{ background:C.surface, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"9px 14px", fontSize:13, outline:"none" }}
+        onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}/>
+
+      {filtered.length === 0 && <Card style={{ textAlign:"center", padding:"40px 0", color:C.muted }}>沒有符合的訂單</Card>}
+
+      {filtered.map(o => {
+        const st = ORDER_STATUS[o.status] || ORDER_STATUS.unpaid;
+        const nextSt = o.status && ORDER_STATUS[o.status]?.next ? ORDER_STATUS[ORDER_STATUS[o.status].next] : null;
+        const isAdvancing = advancing[o.id];
+        const isDeleting = deleting[o.id];
+        const date = o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : "";
+
+        return (
+          <Card key={o.id} style={{ overflow:"hidden" }}>
+            {/* 訂單 header */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                  <span style={{ fontSize:12, color:C.muted }}>#{o.no}</span>
+                  <span style={{ fontSize:11, color:C.muted }}>·</span>
+                  <span style={{ fontSize:12, color:C.muted }}>{date}</span>
+                </div>
+                <div style={{ fontWeight:700, fontSize:14, color:C.text }}>{o.customer_name||o.customerName}</div>
+                <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
+                  {(o.items||[]).map(it=>it.name).join("・").slice(0,40)}{(o.items||[]).join("").length>40?"...":""}
+                </div>
+              </div>
+              <div style={{ textAlign:"right", flexShrink:0, marginLeft:8 }}>
+                <div style={{ fontWeight:700, fontSize:15, color:C.accentDark }}>{fmtMoney(o.total||0)}</div>
+                <div style={{ fontSize:11, color:o.paid?C.green:C.amber, marginTop:2 }}>{o.paid?"✓ 已收款":"未收款"}</div>
+              </div>
+            </div>
+
+            {/* 品項 */}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}>
+              {(o.items||[]).map((it,i)=>(
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:6, background:C.bgDeep, borderRadius:8, padding:"4px 8px" }}>
+                  <div style={{ width:24, height:24, borderRadius:5, background:C.surface, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>
+                    {it.image?.startsWith("data:")||it.image?.startsWith("http")
+                      ?<img src={it.image} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
+                      :it.image||"🛒"}
+                  </div>
+                  <span style={{ fontSize:12 }}>{it.name} ×{it.qty}</span>
+                  {it.price>0&&<span style={{ fontSize:11, color:C.muted }}>{fmtMoney(it.price*it.qty)}</span>}
+                </div>
+              ))}
+            </div>
+
+            {/* ERP 進度條 */}
+            <div style={{ display:"flex", alignItems:"center", gap:0, marginBottom:12, overflowX:"auto" }}>
+              {ERP_STEPS.map((s, i) => {
+                const stepSt = ORDER_STATUS[s];
+                const stepIdx = ERP_STEPS.indexOf(o.status);
+                const curIdx = i;
+                const done = stepIdx > curIdx;
+                const active = stepIdx === curIdx;
+                return (
+                  <div key={s} style={{ display:"flex", alignItems:"center", flex: i<ERP_STEPS.length-1 ? 1 : 0 }}>
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                      <div style={{ width: active?16:10, height: active?16:10, borderRadius:"50%",
+                        background: done ? C.accent : active ? C.accentDark : C.borderLight,
+                        border: `1.5px solid ${done||active ? C.accent : C.borderLight}`,
+                        flexShrink:0, transition:"all .2s" }}/>
+                      <div style={{ fontSize:9, color: active ? C.accent : done ? C.accentLight : C.faint, whiteSpace:"nowrap", fontWeight: active?600:400 }}>{stepSt.label}</div>
+                    </div>
+                    {i < ERP_STEPS.length-1 && <div style={{ flex:1, height:1.5, background: done ? C.accent : C.borderLight, margin:"0 2px", marginBottom:14, transition:"background .3s" }}/>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 操作列 */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", paddingTop:10, borderTop:`1px solid ${C.borderLight}`, gap:8 }}>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                {/* 下一步按鈕 */}
+                {nextSt && (
+                  <button onClick={() => advance(o)} disabled={isAdvancing}
+                    style={{ background:C.accent, color:"#fff", border:"none", borderRadius:99, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:isAdvancing?"not-allowed":"pointer", opacity:isAdvancing?.6:1, whiteSpace:"nowrap" }}>
+                    {isAdvancing ? "更新中..." : `→ ${nextSt.label}`}
+                  </button>
+                )}
+                {/* 下拉選單 */}
+                <select value={o.status} onChange={e=>updateStatus(o, e.target.value)}
+                  style={{ background:C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12, cursor:"pointer", color:C.textMid }}>
+                  {Object.entries(ORDER_STATUS).map(([k,v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+                </select>
+              </div>
+              {/* 刪除按鈕 */}
+              <button onClick={() => deleteOrder(o)} disabled={isDeleting}
+                style={{ background:C.redBg, border:"none", color:C.red, width:30, height:30, borderRadius:8, fontSize:15, cursor:"pointer", flexShrink:0 }}>
+                🗑
+              </button>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── 統計報表頁 ───────────────────────────────────────────────────
+function ReportPage({ data }) {
+  const [period, setPeriod] = useState("all");
+
+  const now = new Date();
+  const orders = Array.from(new Map(data.orders.map(o=>[o.id,o])).values()).filter(o => {
+    if (period === "all") return true;
+    const d = new Date(o.created_at||o.createdAt||0);
+    if (period === "month") return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+    if (period === "week") return (now-d) < 7*24*60*60*1000;
+    return true;
+  });
+
+  const totalRevenue = orders.reduce((s,o) => s+(o.total||0), 0);
+  const totalCost = orders.reduce((s,o) => s+(o.items||[]).reduce((ss,it)=>ss+(it.cost||0)*(it.qty||1),0), 0);
+  const totalProfit = totalRevenue - totalCost;
+  const totalPaid = orders.filter(o=>o.paid).reduce((s,o)=>s+(o.total||0),0);
+  const totalUnpaid = orders.filter(o=>!o.paid).reduce((s,o)=>s+(o.total||0),0);
+  const closedOrders = orders.filter(o=>o.status==="closed");
+
+  // 每位客人帳單
+  const customerMap = {};
+  orders.forEach(o => {
+    const key = o.customer_line_id||o.customerId||o.customer_name||o.customerName||"未知";
+    const name = o.customer_name||o.customerName||"未知";
+    if (!customerMap[key]) customerMap[key] = { name, orders:[], revenue:0, profit:0, unpaid:0 };
+    customerMap[key].orders.push(o);
+    customerMap[key].revenue += (o.total||0);
+    customerMap[key].profit += (o.total||0) - (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
+    if (!o.paid) customerMap[key].unpaid += (o.total||0);
+  });
+  const customers = Object.values(customerMap).sort((a,b)=>b.revenue-a.revenue);
+
+  // 商品銷售排行
+  const productMap = {};
+  orders.forEach(o => {
+    (o.items||[]).forEach(it => {
+      const n = it.name||"";
+      if (!productMap[n]) productMap[n] = { name:n, qty:0, revenue:0 };
+      productMap[n].qty += (it.qty||1);
+      productMap[n].revenue += (it.price||0)*(it.qty||1);
+    });
+  });
+  const products = Object.values(productMap).sort((a,b)=>b.qty-a.qty).slice(0,10);
+
+  const STAT = ({label, value, sub, color}) => (
+    <div style={{ background:C.bgCard, borderRadius:14, padding:"16px", border:`1px solid ${C.borderLight}`, boxShadow:C.shadow }}>
+      <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>{label}</div>
+      <div style={{ fontSize:22, fontWeight:700, color:color||C.accentDark }}>{value}</div>
+      {sub&&<div style={{ fontSize:11, color:C.faint, marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>📊 統計報表</div>
+        <div style={{ display:"flex", gap:6 }}>
+          {[["all","全部"],["month","本月"],["week","本週"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setPeriod(v)}
+              style={{ padding:"5px 12px", borderRadius:99, fontSize:11, fontWeight:600, cursor:"pointer",
+                border:`1.5px solid ${period===v?C.accent:C.border}`,
+                background:period===v?C.accentBg:"transparent", color:period===v?C.accent:C.muted }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 總覽數字 */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        <STAT label="總營收" value={fmtMoney(totalRevenue)} color={C.accentDark}/>
+        <STAT label="總利潤" value={fmtMoney(totalProfit)} color={C.green} sub={`利潤率 ${totalRevenue>0?Math.round(totalProfit/totalRevenue*100):0}%`}/>
+        <STAT label="已收款" value={fmtMoney(totalPaid)} color={C.green}/>
+        <STAT label="未收款" value={fmtMoney(totalUnpaid)} color={totalUnpaid>0?C.red:C.faint}/>
+        <STAT label="總訂單" value={`${orders.length} 筆`} color={C.textMid}/>
+        <STAT label="已結案" value={`${closedOrders.length} 筆`} color={C.muted}/>
+      </div>
+
+      {/* 客人帳單 */}
+      <Card>
+        <div style={{ fontWeight:600, fontSize:14, marginBottom:12 }}>客人帳單</div>
+        {customers.length===0 && <div style={{ color:C.muted, fontSize:13 }}>尚無資料</div>}
+        {customers.map((c,i)=>(
+          <div key={c.name} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i<customers.length-1 ? `1px solid ${C.borderLight}` : "none" }}>
+            <div>
+              <div style={{ fontWeight:600, fontSize:13 }}>{c.name}</div>
+              <div style={{ fontSize:11, color:C.muted }}>{c.orders.length} 筆訂單</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontWeight:700, color:C.accentDark }}>{fmtMoney(c.revenue)}</div>
+              {c.unpaid>0&&<div style={{ fontSize:11, color:C.red }}>未收 {fmtMoney(c.unpaid)}</div>}
+              <div style={{ fontSize:11, color:C.green }}>利潤 {fmtMoney(c.profit)}</div>
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      {/* 商品銷售排行 */}
+      <Card>
+        <div style={{ fontWeight:600, fontSize:14, marginBottom:12 }}>商品銷售排行 Top 10</div>
+        {products.length===0 && <div style={{ color:C.muted, fontSize:13 }}>尚無資料</div>}
+        {products.map((p,i)=>(
+          <div key={p.name} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom: i<products.length-1 ? `1px solid ${C.borderLight}` : "none" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:22, height:22, borderRadius:6, background:C.accentBg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:C.accent }}>{i+1}</div>
+              <div style={{ fontSize:13 }}>{p.name}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontWeight:600, color:C.textMid }}>{p.qty} 個</div>
+              <div style={{ fontSize:11, color:C.muted }}>{fmtMoney(p.revenue)}</div>
+            </div>
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ─── 結案區 ───────────────────────────────────────────────────────
+function ClosedPage({ data, setData, toast }) {
+  const [search, setSearch] = useState("");
+  const closed = Array.from(new Map(data.orders.map(o=>[o.id,o])).values())
+    .filter(o => o.status === "closed")
+    .sort((a,b) => new Date(b.closed_at||b.created_at) - new Date(a.closed_at||a.created_at));
+
+  const filtered = closed.filter(o =>
+    !search || (o.customer_name||o.customerName||"").includes(search) || (o.no||"").includes(search)
+  );
+
+  const reopen = async (o) => {
+    const { error } = await supabase.from("orders").update({ status: "shipped", closed_at: null }).eq("id", o.id);
+    if (!error) { setData(d => ({ ...d, orders: d.orders.map(x => x.id===o.id ? {...x, status:"shipped", closed_at:null} : x) })); toast("已重新開啟"); }
+  };
+
+  const deleteOrder = async (o) => {
+    if (!window.confirm(`確定刪除結案訂單 #${o.no}？`)) return;
+    const { error } = await supabase.from("orders").delete().eq("id", o.id);
+    if (!error) { setData(d => ({ ...d, orders: d.orders.filter(x => x.id !== o.id) })); toast("已刪除"); }
+  };
+
+  const exportClosed = () => {
+    const header = ["訂單號","結案日期","客人","商品","數量","售價","成本","利潤","付款方式","是否收款"];
+    const rows = [];
+    closed.forEach(o => {
+      (o.items||[]).forEach((it,idx)=>{
+        rows.push([
+          idx===0?"#"+sanitize(o.no):"",
+          idx===0?(o.closed_at?new Date(o.closed_at).toLocaleDateString("zh-TW"):""):"",
+          idx===0?sanitize(o.customer_name||o.customerName||""):"",
+          sanitize(it.name||""),
+          it.qty||1, (it.price||0)*(it.qty||1), (it.cost||0)*(it.qty||1),
+          ((it.price||0)-(it.cost||0))*(it.qty||1),
+          idx===0?(o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":""):"",
+          idx===0?(o.paid?"是":"否"):"",
+        ]);
+      });
+    });
+    const csv = [header,...rows].map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("
+");
+    const blob = new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+    const a = document.createElement("a"); a.href=URL.createObjectURL(blob);
+    a.download=`結案訂單_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
+    a.click(); toast("已匯出 📊");
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>🎉 結案區</div>
+          <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>共 {closed.length} 筆結案訂單</div>
+        </div>
+        <button onClick={exportClosed}
+          style={{ background:C.green, color:"#fff", border:"none", borderRadius:99, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+          📊 匯出CSV
+        </button>
+      </div>
+
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜尋客人或訂單號..."
+        style={{ background:C.surface, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"9px 14px", fontSize:13, outline:"none" }}
+        onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}/>
+
+      {filtered.length===0 && <Card style={{ textAlign:"center", padding:"40px 0" }}><div style={{ fontSize:36 }}>🎉</div><div style={{ color:C.muted, marginTop:8 }}>還沒有結案訂單</div></Card>}
+
+      {filtered.map(o => {
+        const closedDate = o.closed_at ? new Date(o.closed_at).toLocaleDateString("zh-TW") : "";
+        const orderDate = o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : "";
+        const profit = (o.total||0) - (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
+        return (
+          <Card key={o.id}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+              <div>
+                <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:4 }}>
+                  <span style={{ fontSize:12, color:C.muted }}>#{o.no}</span>
+                  <span style={{ fontSize:11, background:C.bgDeep, color:C.muted, padding:"2px 8px", borderRadius:99 }}>下單 {orderDate}</span>
+                  {closedDate&&<span style={{ fontSize:11, background:C.greenBg, color:C.green, padding:"2px 8px", borderRadius:99 }}>結案 {closedDate}</span>}
+                </div>
+                <div style={{ fontWeight:700, fontSize:14 }}>{o.customer_name||o.customerName}</div>
+                <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{(o.items||[]).map(it=>it.name).join("・")}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontWeight:700, color:C.accentDark }}>{fmtMoney(o.total||0)}</div>
+                <div style={{ fontSize:11, color:C.green }}>利潤 {fmtMoney(profit)}</div>
+                <div style={{ fontSize:11, color:o.paid?C.green:C.red }}>{o.paid?"✓ 已收款":"未收款"}</div>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8, paddingTop:10, borderTop:`1px solid ${C.borderLight}` }}>
+              <button onClick={()=>reopen(o)}
+                style={{ fontSize:12, background:C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", color:C.textMid }}>
+                ↩ 重新開啟
+              </button>
+              <button onClick={()=>deleteOrder(o)}
+                style={{ fontSize:12, background:C.redBg, border:"none", borderRadius:8, padding:"6px 14px", cursor:"pointer", color:C.red, fontWeight:600 }}>
+                🗑 刪除
+              </button>
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }
