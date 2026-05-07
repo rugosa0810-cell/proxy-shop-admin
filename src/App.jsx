@@ -1261,13 +1261,21 @@ function ProductModal({ product, onSave, onClose }) {
           {variants.length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
               {variants.map(v => (
-                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:C.bgDeep, borderRadius:8, border:`1px solid ${C.border}` }}>
+                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 12px", background:C.bgDeep, borderRadius:8, border:`1px solid ${C.border}` }}>
+                  <div style={{ flex:2, fontSize:13, fontWeight:600 }}>{v.name}</div>
                   <div style={{ flex:1 }}>
-                    <span style={{ fontSize:13, fontWeight:600 }}>{v.name}</span>
-                    {v.price > 0 && <span style={{ fontSize:11, color:C.muted, marginLeft:8 }}>+NT${v.price}</span>}
-                    {v.cost > 0 && <span style={{ fontSize:11, color:C.red, marginLeft:8 }}>成本 NT${v.cost}</span>}
+                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>加價 NT$</div>
+                    <input type="number" value={v.price||0}
+                      onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, price:Number(e.target.value)||0} : x))}
+                      style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12 }}/>
                   </div>
-                  <button onClick={() => removeVariant(v.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:16 }}>×</button>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>成本 NT$</div>
+                    <input type="number" value={v.cost||0}
+                      onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, cost:Number(e.target.value)||0} : x))}
+                      style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12, color:C.red }}/>
+                  </div>
+                  <button onClick={() => removeVariant(v.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:16, flexShrink:0 }}>×</button>
                 </div>
               ))}
             </div>
