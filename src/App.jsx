@@ -664,66 +664,218 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
           <Btn sm variant="ghost" style={{ marginTop:12 }} onClick={() => changeFilter("all")}>顯示全部</Btn>
         </Card>
       )}
-      {filtered.map(o => (
-        <div key={o.id} style={{ background: C.surface, borderRadius: 16, border: `1.5px solid ${C.border}`, overflow: "hidden", boxShadow: C.shadow }}>
-          <div style={{ padding: "13px 14px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-              <div>
-                <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>#{o.no} · {o.customer_name || o.customerName}</div>
-                <div style={{ fontWeight: 700 }}>{(o.items||[])[0]?.name}{(o.items||[]).length > 1 ? ` 等${(o.items||[]).length}件` : ""}</div>
-              </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <StatusBadge status={o.status} />
-                <select value={o.status} onChange={e => updateStatus(o.id, e.target.value)} style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, color: C.text, cursor: "pointer" }}>
-                  {Object.entries(ORDER_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
+      {filtered.map(o => <OrderCard key={o.id} o={o} updateStatus={updateStatus} del={del} setData={setData} toast={toast} />)}
+      {showAdd && <AddOrderModal data={data} setData={setData} onClose={() => setShowAdd(false)} toast={toast} />}
+    </div>
+  );
+}
+
+// ─── 訂單卡片元件 ────────────────────────────────────────────────
+function OrderCard({ o, updateStatus, del, setData, toast }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const cost = (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
+  const total = o.total || 0;
+  const deposit = Number(o.deposit) || 0;
+  const shippingFee = Number(o.shipping_fee) || 0;
+  const finalPayment = Math.max(0, total + shippingFee - deposit);
+  const totalPaid = (o.deposit_paid ? deposit : 0) + (o.final_paid ? finalPayment : 0);
+  const totalUnpaid = total + shippingFee - totalPaid;
+  const orderDate = o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : (o.createdAt||"");
+
+  // 付款狀態標籤
+  const payStatus = () => {
+    if (o.final_paid) return { label:"尾款已付", color:C.green, bg:C.greenBg };
+    if (o.deposit_paid) return { label:"已付訂金", color:C.accent, bg:C.accentBg };
+    return { label:"未付款", color:C.amber, bg:C.amberBg };
+  };
+  const ps = payStatus();
+
+  return (
+    <div style={{ background:C.surface, borderRadius:16, border:`1.5px solid ${C.border}`, overflow:"hidden", boxShadow:C.shadow }}>
+      {/* ── 訂單頭部（點擊展開） ── */}
+      <div style={{ padding:"13px 14px", cursor:"pointer" }} onClick={()=>setExpanded(v=>!v)}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+              <span style={{ fontSize:11, color:C.muted }}>#{o.no}</span>
+              <span style={{ fontSize:11, color:C.muted }}>·</span>
+              <span style={{ fontSize:11, color:C.muted }}>{orderDate}</span>
             </div>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:4 }}>
-              {(o.items||[]).map((it,idx) => (
-                <div key={idx} style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:28, height:28, borderRadius:6, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:C.text, marginBottom:4 }}>
+              {o.customer_name||o.customerName}
+            </div>
+            <div style={{ fontSize:12, color:C.muted }}>
+              {(o.items||[])[0]?.name}{(o.items||[]).length > 1 ? ` 等 ${(o.items||[]).length} 件` : ""}
+            </div>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:5 }}>
+            <StatusBadge status={o.status}/>
+            <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:ps.bg, color:ps.color, fontWeight:600 }}>{ps.label}</span>
+            <span style={{ fontSize:14, fontWeight:700, color:C.accentDark }}>{fmtMoney(total)}</span>
+          </div>
+        </div>
+        {/* 展開箭頭 */}
+        <div style={{ textAlign:"center", marginTop:4, fontSize:11, color:C.faint }}>
+          {expanded ? "▲ 收起" : "▼ 展開詳情"}
+        </div>
+      </div>
+
+      {/* ── 展開詳情 ── */}
+      {expanded && (
+        <div style={{ borderTop:`1px solid ${C.borderLight}` }}>
+
+          {/* 區塊一：訂單概覽 */}
+          <div style={{ padding:"14px 14px 10px", background:C.bgDeep }}>
+            <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:10, letterSpacing:.5 }}>訂單概覽</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {[
+                { label:"訂單編號", value:`#${o.no}` },
+                { label:"客人", value:o.customer_name||o.customerName||"" },
+                { label:"訂單狀態", value:<StatusBadge status={o.status}/> },
+                { label:"付款狀態", value:<span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:ps.bg, color:ps.color, fontWeight:600 }}>{ps.label}</span> },
+                { label:"總金額", value:fmtMoney(total+shippingFee), bold:true },
+                { label:"已付款", value:fmtMoney(totalPaid), color:C.green },
+                { label:"未付款", value:fmtMoney(Math.max(0,totalUnpaid)), color:totalUnpaid>0?C.red:C.green },
+                { label:"下單日期", value:orderDate },
+              ].map(item=>(
+                <div key={item.label} style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                  <span style={{ fontSize:10, color:C.faint }}>{item.label}</span>
+                  <span style={{ fontSize:13, fontWeight:item.bold?700:500, color:item.color||C.text }}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+            {/* 狀態更改 */}
+            <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:11, color:C.muted }}>更改狀態：</span>
+              <select value={o.status} onChange={e=>{ e.stopPropagation(); updateStatus(o.id, e.target.value); }}
+                style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 8px", fontSize:12, cursor:"pointer" }}>
+                {Object.entries(ORDER_STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* 區塊二：商品明細 */}
+          <div style={{ padding:"14px" }}>
+            <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:10, letterSpacing:.5 }}>商品明細</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {(o.items||[]).map((it,idx)=>(
+                <div key={idx} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", background:C.bgDeep, borderRadius:10 }}>
+                  <div style={{ width:36, height:36, borderRadius:8, background:C.surface, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
                     {it.image?.startsWith("data:")||it.image?.startsWith("http")
                       ?<img src={it.image} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
                       :it.image||"🛒"}
                   </div>
-                  <span style={{ fontSize:12, color:C.muted }}>{it.name} ×{it.qty}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:500 }}>{it.name}</div>
+                    <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>×{it.qty}</div>
+                  </div>
+                  <div style={{ textAlign:"right", flexShrink:0 }}>
+                    <div style={{ fontSize:11, color:C.muted }}>成本 {fmtMoney((it.cost||0)*(it.qty||1))}</div>
+                    <div style={{ fontSize:13, fontWeight:600, color:C.accentDark }}>{fmtMoney((it.price||0)*(it.qty||1))}</div>
+                  </div>
                 </div>
               ))}
             </div>
+            {/* 小計 */}
+            <div style={{ marginTop:10, padding:"10px 12px", background:C.bgDeep, borderRadius:10, display:"flex", flexDirection:"column", gap:4 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted }}>
+                <span>商品小計</span><span>{fmtMoney(total)}</span>
+              </div>
+              {shippingFee>0&&<div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted }}>
+                <span>國際運費</span><span>{fmtMoney(shippingFee)}</span>
+              </div>}
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted }}>
+                <span>成本</span><span>{fmtMoney(cost)}</span>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, fontWeight:700, color:C.green, borderTop:`1px solid ${C.border}`, paddingTop:6, marginTop:2 }}>
+                <span>利潤</span><span>{fmtMoney(o.profit||0)}</span>
+              </div>
+            </div>
           </div>
-          <div style={{ background: C.bgDeep, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 13 }}>
-              <span style={{ color: C.muted }}>成本 {fmtMoney((o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0))}</span>
-              <span style={{ margin: "0 8px", color: C.faint }}>·</span>
-              <span>售 {fmtMoney(o.total)}</span>
-              <span style={{ margin: "0 8px", color: C.faint }}>·</span>
-              <span style={{ color: C.green, fontWeight: 700 }}>↑ {fmtMoney(o.profit||0)}</span>
+
+          {/* 區塊三：付款紀錄 */}
+          <div style={{ padding:"0 14px 14px" }}>
+            <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:10, letterSpacing:.5 }}>付款紀錄</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {/* 訂金紀錄 */}
+              {deposit > 0 && (
+                <div style={{ padding:"10px 12px", background: o.deposit_paid?C.greenBg:C.amberBg, borderRadius:10, border:`1px solid ${o.deposit_paid?C.green:C.amber}30` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:600, color:o.deposit_paid?C.green:C.amber }}>
+                        {o.deposit_paid?"✓ 訂金已收":"○ 訂金待收"}
+                      </div>
+                      <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
+                        {o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":""}
+                        {o.bank_code?` (${o.bank_code})`:""}
+                        {o.payment_date?` · ${o.payment_date}`:""}
+                      </div>
+                    </div>
+                    <div style={{ fontSize:15, fontWeight:700, color:o.deposit_paid?C.green:C.amber }}>{fmtMoney(deposit)}</div>
+                  </div>
+                </div>
+              )}
+              {/* 尾款紀錄 */}
+              {(shippingFee>0||deposit>0) && (
+                <div style={{ padding:"10px 12px", background: o.final_paid?C.greenBg:C.blueBg, borderRadius:10, border:`1px solid ${o.final_paid?C.green:C.blue}30` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:600, color:o.final_paid?C.green:C.blue }}>
+                        {o.final_paid?"✓ 尾款已收":"○ 尾款待收"}
+                      </div>
+                      <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
+                        商品 {fmtMoney(total)} + 運費 {fmtMoney(shippingFee)} - 訂金 {fmtMoney(deposit)}
+                      </div>
+                    </div>
+                    <div style={{ fontSize:15, fontWeight:700, color:o.final_paid?C.green:C.blue }}>{fmtMoney(finalPayment)}</div>
+                  </div>
+                </div>
+              )}
+              {/* 若無訂金/尾款，顯示一般收款狀態 */}
+              {deposit===0 && shippingFee===0 && (
+                <div style={{ padding:"10px 12px", background:o.paid?C.greenBg:C.amberBg, borderRadius:10 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:600, color:o.paid?C.green:C.amber }}>{o.paid?"✓ 已收款":"○ 未收款"}</div>
+                      <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
+                        {o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":""}
+                        {o.bank_code?` (${o.bank_code})`:""}
+                        {o.payment_date?` · ${o.payment_date}`:""}
+                      </div>
+                    </div>
+                    <div style={{ fontSize:15, fontWeight:700, color:o.paid?C.green:C.amber }}>{fmtMoney(total)}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* 付款編輯 */}
+            <div style={{ marginTop:10 }}>
+              <PaymentFields order={o} setData={setData} toast={toast}/>
+            </div>
+          </div>
+
+          {/* 操作列 */}
+          <div style={{ padding:"10px 14px", borderTop:`1px solid ${C.borderLight}`, display:"flex", justifyContent:"space-between", alignItems:"center", background:C.bgDeep }}>
+            <div style={{ fontSize:12 }}>
+              <span style={{ color:C.muted }}>成本 {fmtMoney(cost)}</span>
+              <span style={{ margin:"0 6px", color:C.faint }}>·</span>
+              <span style={{ color:C.green, fontWeight:700 }}>利潤 {fmtMoney(o.profit||0)}</span>
             </div>
             <div style={{ display:"flex", gap:6 }}>
-              {o.status === "arrived" && (
-                <button onClick={async () => {
-                  if (!window.confirm(`確定封存訂單 #${o.no}？`)) return;
-                  const now = new Date().toISOString();
-                  const { error } = await supabase.from("orders").update({ archived: true, archived_at: now }).eq("id", o.id);
-                  if (!error) {
-                    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, archived: true, archived_at: now } : x) }));
-                    toast("已封存 📦");
-                  }
-                }} style={{ background:"#eaede8", border:"none", color:"#3d4a3e", padding:"0 10px", height:30, borderRadius:8, fontSize:11, cursor:"pointer", fontWeight:600 }}>📦 封存</button>
+              {o.status==="arrived"&&(
+                <button onClick={async()=>{
+                  if(!window.confirm(`確定封存訂單 #${o.no}？`))return;
+                  const now=new Date().toISOString();
+                  const{error}=await supabase.from("orders").update({archived:true,archived_at:now}).eq("id",o.id);
+                  if(!error){setData(d=>({...d,orders:d.orders.map(x=>x.id===o.id?{...x,archived:true,archived_at:now}:x)}));toast("已封存 📦");}
+                }} style={{ background:"#eaede8",border:"none",color:"#3d4a3e",padding:"0 10px",height:30,borderRadius:8,fontSize:11,cursor:"pointer",fontWeight:600 }}>📦 封存</button>
               )}
-              <button onClick={() => del(o.id)} style={{ background: C.redBg, border: "none", color: C.red, width: 30, height: 30, borderRadius: 8, fontSize: 15, cursor: "pointer" }}>🗑</button>
+              <button onClick={()=>del(o.id)} style={{ background:C.redBg,border:"none",color:C.red,width:30,height:30,borderRadius:8,fontSize:15,cursor:"pointer" }}>🗑</button>
             </div>
-          </div>
-          <div style={{ padding: "4px 14px 10px" }}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
-              📅 {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : o.createdAt}
-            </div>
-            <PaymentFields order={o} setData={setData} />
           </div>
         </div>
-      ))}
-      {showAdd && <AddOrderModal data={data} setData={setData} onClose={() => setShowAdd(false)} toast={toast} />}
+      )}
     </div>
   );
 }
