@@ -2243,43 +2243,62 @@ function LineNotifyModal({ targets, onSend, onClose }) {
 }
 
 // ─── 付款欄位元件 ────────────────────────────────────────────────
-function PaymentFields({ order: o, setData }) {
+function PaymentFields({ order: o, setData, toast }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     payment_method: o.payment_method || "",
     bank_code:      o.bank_code || "",
-    paid:           o.paid || false,
     payment_date:   o.payment_date || "",
     ship_date:      o.ship_date || "",
-    shipping_fee:   o.shipping_fee || "",
+    shipping_fee:   String(o.shipping_fee || ""),
+    deposit:        String(o.deposit || ""),
+    deposit_paid:   o.deposit_paid || false,
+    final_paid:     o.final_paid || false,
   });
 
+  const total = o.total || 0;
+  const liveShipping = Number(form.shipping_fee) || 0;
+  const liveDeposit  = Number(form.deposit) || 0;
+  const liveFinal    = Math.max(0, total + liveShipping - liveDeposit);
+
   const save = async () => {
-    const { error } = await supabase.from("orders").update(form).eq("id", o.id);
+    const updateData = {
+      ...form,
+      shipping_fee:   Number(form.shipping_fee) || 0,
+      deposit:        Number(form.deposit) || 0,
+      final_payment:  Math.max(0, total + (Number(form.shipping_fee)||0) - (Number(form.deposit)||0)),
+    };
+    // 付訂金 → 待採買
+    if (form.deposit_paid && (o.status === "pending_review" || !o.status)) {
+      updateData.status = "pending";
+    }
+    // 尾款付清 → 待採買（若尚未採買）
+    if (form.final_paid && o.status === "pending_review") {
+      updateData.status = "pending";
+    }
+    const { error } = await supabase.from("orders").update(updateData).eq("id", o.id);
     if (!error) {
-      setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, ...form } : x) }));
+      setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, ...updateData } : x) }));
       setEditing(false);
+      if (updateData.status === "pending" && toast) toast("✅ 款項已收，訂單更新為「待採買」");
+    } else {
+      if (toast) toast("儲存失敗，請稍後再試");
     }
   };
 
+  // 顯示模式
   if (!editing) return (
-    <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
-      {o.payment_method && <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:C.bgDeep, color:C.textMid }}>{o.payment_method === "transfer" ? "匯款" : "貨到付款"}{o.bank_code ? ` (${o.bank_code})` : ""}</span>}
-      {o.paid ? <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:C.greenBg, color:C.green, fontWeight:600 }}>✓ 已收款</span>
-              : <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:C.amberBg, color:C.amber }}>未收款</span>}
-      {o.payment_date && <span style={{ fontSize:11, color:C.muted }}>收款 {o.payment_date}</span>}
-      {o.ship_date && <span style={{ fontSize:11, color:C.muted }}>出貨 {o.ship_date}</span>}
-      {o.shipping_fee > 0 && <span style={{ fontSize:11, color:C.muted }}>運費 {fmtMoney(o.shipping_fee)}</span>}
-      <button onClick={() => { setForm({ payment_method:o.payment_method||"", bank_code:o.bank_code||"", paid:o.paid||false, payment_date:o.payment_date||"", ship_date:o.ship_date||"", shipping_fee:o.shipping_fee||"" }); setEditing(true); }}
-        style={{ fontSize:11, background:"none", border:`1px solid ${C.border}`, borderRadius:99, padding:"2px 10px", cursor:"pointer", color:C.muted }}>
-        ✏️ 編輯付款
-      </button>
-    </div>
+    <button onClick={() => { setForm({ payment_method:o.payment_method||"", bank_code:o.bank_code||"", payment_date:o.payment_date||"", ship_date:o.ship_date||"", shipping_fee:String(o.shipping_fee||""), deposit:String(o.deposit||""), deposit_paid:o.deposit_paid||false, final_paid:o.final_paid||false }); setEditing(true); }}
+      style={{ fontSize:11, background:"none", border:`1px solid ${C.border}`, borderRadius:99, padding:"3px 12px", cursor:"pointer", color:C.muted, display:"block" }}>
+      ✏️ 編輯付款資訊
+    </button>
   );
 
   return (
-    <div style={{ background:C.bgDeep, borderRadius:10, padding:"12px", display:"flex", flexDirection:"column", gap:8 }}>
-      <div style={{ fontSize:12, fontWeight:600, color:C.textMid, marginBottom:2 }}>付款資訊</div>
+    <div style={{ background:C.surface, borderRadius:12, padding:"14px", display:"flex", flexDirection:"column", gap:10, border:`1px solid ${C.border}` }}>
+      <div style={{ fontSize:12, fontWeight:600, color:C.textMid }}>編輯付款資訊</div>
+
+      {/* 付款方式 */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
         <div>
           <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>付款方式</div>
@@ -2307,17 +2326,52 @@ function PaymentFields({ order: o, setData }) {
           <input type="date" value={form.ship_date} onChange={e => setForm(p => ({ ...p, ship_date: e.target.value }))}
             style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
         </div>
-        <div>
-          <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>國際運費 NT$</div>
-          <input type="number" value={form.shipping_fee} onChange={e => setForm(p => ({ ...p, shipping_fee: Number(e.target.value) }))} placeholder="0"
-            style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+      </div>
+
+      {/* 訂金 / 運費 / 尾款 */}
+      <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:10 }}>
+        <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:8 }}>訂金 / 尾款</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+          <div>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>訂金 NT$</div>
+            <input type="number" value={form.deposit} onChange={e => setForm(p => ({ ...p, deposit: e.target.value }))} placeholder="0"
+              style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>國際運費 NT$</div>
+            <input type="number" value={form.shipping_fee} onChange={e => setForm(p => ({ ...p, shipping_fee: e.target.value }))} placeholder="0"
+              style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:12 }}/>
+          </div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:8, paddingTop:16 }}>
-          <input type="checkbox" id={`paid-${o.id}`} checked={form.paid} onChange={e => setForm(p => ({ ...p, paid: e.target.checked }))} style={{ width:16, height:16, accentColor:C.green }}/>
-          <label htmlFor={`paid-${o.id}`} style={{ fontSize:12, color:C.textMid, cursor:"pointer" }}>已收款</label>
+
+        {/* 尾款計算 */}
+        {(liveDeposit > 0 || liveShipping > 0) && (
+          <div style={{ background:C.bgDeep, borderRadius:8, padding:"10px 12px", fontSize:12, marginBottom:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", color:C.muted, marginBottom:2 }}><span>商品總額</span><span>{fmtMoney(total)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", color:C.muted, marginBottom:2 }}><span>運費</span><span>+{fmtMoney(liveShipping)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", color:C.muted, marginBottom:6 }}><span>訂金</span><span>-{fmtMoney(liveDeposit)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", fontWeight:700, color:C.accentDark, borderTop:`1px solid ${C.border}`, paddingTop:5 }}>
+              <span>尾款</span><span>{fmtMoney(liveFinal)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* 訂金/尾款 checkbox */}
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+          <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+            <input type="checkbox" checked={form.deposit_paid} onChange={e => setForm(p => ({ ...p, deposit_paid: e.target.checked }))} style={{ width:16, height:16, accentColor:C.green }}/>
+            <span style={{ fontSize:12 }}>✅ 訂金已收到</span>
+            {form.deposit_paid && liveDeposit > 0 && <span style={{ fontSize:11, color:C.green }}>{fmtMoney(liveDeposit)}</span>}
+          </label>
+          <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+            <input type="checkbox" checked={form.final_paid} onChange={e => setForm(p => ({ ...p, final_paid: e.target.checked }))} style={{ width:16, height:16, accentColor:C.accent }}/>
+            <span style={{ fontSize:12 }}>✅ 尾款已收到</span>
+            {form.final_paid && <span style={{ fontSize:11, color:C.accent }}>{fmtMoney(liveFinal)} → 自動更新待採買</span>}
+          </label>
         </div>
       </div>
-      <div style={{ display:"flex", gap:8 }}>
+
+      <div style={{ display:"flex", gap:8, paddingTop:4 }}>
         <button onClick={save} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"7px 18px", fontSize:12, fontWeight:600, cursor:"pointer" }}>儲存</button>
         <button onClick={() => setEditing(false)} style={{ background:C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 14px", fontSize:12, cursor:"pointer", color:C.muted }}>取消</button>
       </div>
