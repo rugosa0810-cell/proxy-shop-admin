@@ -771,8 +771,8 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
                     <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>×{it.qty}</div>
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
-                    <div style={{ fontSize:11, color:C.muted }}>成本 {fmtMoney((it.cost||0)*(it.qty||1))}</div>
                     <div style={{ fontSize:13, fontWeight:600, color:C.accentDark }}>{fmtMoney((it.price||0)*(it.qty||1))}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>成本 {fmtMoney((it.cost||0)*(it.qty||1))}</div>
                   </div>
                 </div>
               ))}
@@ -989,8 +989,8 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                     <Input label="款式" value={it.variant} onChange={v => updateItem(it.id, "variant", v)} placeholder="草莓款 / 限定版" />
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    <Input label="成本 NT$" type="number" value={it.cost} onChange={v => updateItem(it.id, "cost", v)} placeholder="560" />
                     <Input label="售價 NT$ *" type="number" value={it.price} onChange={v => updateItem(it.id, "price", v)} placeholder="728" />
+                    <Input label="成本 NT$" type="number" value={it.cost} onChange={v => updateItem(it.id, "cost", v)} placeholder="560" />
                     <Input label="數量" type="number" value={it.qty} onChange={v => updateItem(it.id, "qty", v)} placeholder="1" />
                   </div>
                   {it.price && it.cost && Number(it.price) > 0 && (
@@ -1173,8 +1173,8 @@ function ProductModal({ product, onSave, onClose }) {
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, cost:Number(vCost)||0 }]);
-    setVName(""); setVPrice(""); setVCost("");
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0 }]);
+    setVName(""); setVPrice("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -1283,7 +1283,6 @@ function ProductModal({ product, onSave, onClose }) {
           <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
             <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ flex:2 }} />
             <Input label="加價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ flex:1 }} />
-            <Input label="成本 NT$" type="number" value={vCost} onChange={setVCost} placeholder="0" style={{ flex:1 }} />
             <Btn sm variant="soft" onClick={addVariant} style={{ marginBottom:1 }}>+ 新增</Btn>
           </div>
         </div>
@@ -1374,8 +1373,8 @@ function StockModal({ product, onSave, onClose }) {
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, cost:Number(vCost)||0 }]);
-    setVName(""); setVPrice(""); setVCost("");
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0 }]);
+    setVName(""); setVPrice("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -1986,11 +1985,9 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                         {/* 商品明細 */}
                         <div style={{ margin:"0 14px", background:C.surface, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}` }}>
                           {(o.items||[]).map((it, i) => {
-                            const isPaid = (o.item_payments||[])[i] === true;
                             return (
-                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none", gap:10, background: isPaid ? "#f0faf3" : "transparent" }}>
+                            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", borderBottom: i < (o.items.length-1) ? `1px solid ${C.borderSoft}` : "none", gap:10 }}>
                               <div style={{ display:"flex", alignItems:"center", gap:10, flex:1, minWidth:0 }}>
-                                {/* 品項圖片 */}
                                 <div style={{ width:40, height:40, borderRadius:8, background:C.bgDeep, flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>
                                   {it.image?.startsWith("data:")||it.image?.startsWith("http")
                                     ? <img src={it.image} alt={it.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
@@ -2000,34 +1997,13 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                                   }
                                 </div>
                                 <div style={{ minWidth:0 }}>
-                                  <div style={{ fontSize:13, fontWeight:600, textDecoration: isPaid ? "line-through" : "none", color: isPaid ? C.muted : C.text }}>{it.name}</div>
+                                  <div style={{ fontSize:13, fontWeight:600, color:C.text }}>{it.name}</div>
                                   {it.note && <div style={{ fontSize:11, color:C.muted }}>備註：{it.note}</div>}
                                 </div>
                               </div>
-                              <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-                                <div style={{ textAlign:"right", fontSize:13 }}>
-                                  <div style={{ color:C.muted }}>×{it.qty}</div>
-                                  <div style={{ fontWeight:700 }}>{fmtMoney((it.price||0) * (it.qty||1))}</div>
-                                </div>
-                                {/* 付款狀態按鈕 */}
-                                <button onClick={async () => {
-                                  const payments = [...(o.item_payments || Array(o.items.length).fill(false))];
-                                  while (payments.length < o.items.length) payments.push(false);
-                                  payments[i] = !payments[i];
-                                  const { error } = await supabase.from("orders").update({ item_payments: payments }).eq("id", o.id);
-                                  if (!error) {
-                                    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, item_payments: payments } : x) }));
-                                  } else {
-                                    console.error("付款更新失敗", error);
-                                    alert("更新失敗，請稍後再試");
-                                  }
-                                }}
-                                  style={{ fontSize:11, padding:"4px 10px", borderRadius:99, border:"none", cursor:"pointer", fontWeight:600, whiteSpace:"nowrap",
-                                    background: isPaid ? C.green : C.bgDeep,
-                                    color: isPaid ? "#fff" : C.muted,
-                                  }}>
-                                  {isPaid ? "✓ 已付款" : "未付款"}
-                                </button>
+                              <div style={{ textAlign:"right", fontSize:13, flexShrink:0 }}>
+                                <div style={{ color:C.muted }}>×{it.qty}</div>
+                                <div style={{ fontWeight:700 }}>{fmtMoney((it.price||0) * (it.qty||1))}</div>
                               </div>
                             </div>
                             );
