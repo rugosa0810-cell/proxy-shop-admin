@@ -1100,9 +1100,21 @@ function CatalogPage({ data, setData, toast }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>賣場管理</div>
-        <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 10px", background:C.accentBg, borderRadius:8, border:`1px solid ${C.border}` }}>
+            <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>💱 匯率 ¥1 = NT$</span>
+            <input type="number" step="0.001" value={data.rate || 0}
+              onChange={e => {
+                const r = Number(e.target.value) || 0;
+                setData(d => ({ ...d, rate: r }));
+                try { localStorage.setItem("exchange_rate_jpy", String(r)); } catch(err) {}
+              }}
+              style={{ width:70, background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 8px", fontSize:13, color:C.text, fontWeight:600 }} />
+          </div>
+          <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
+        </div>
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
@@ -1254,7 +1266,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
             例如：顏色（紅色、藍色）、尺寸（S / M / L）<br/>客人下單時可從中選擇
           </div>
           <div style={{ fontSize:11, color:C.muted, marginBottom:12, padding:"6px 10px", background:C.accentBg, borderRadius:6, border:`1px solid ${C.border}` }}>
-            💱 成本＝日幣價格 × 匯率（目前 ¥1 = NT${rate || "?"}），可在「匯率設定」修改
+            💱 成本＝日幣價格 × 匯率（目前 ¥1 = NT${rate || "?"}），可在頁面右上方修改匯率
           </div>
           {variants.length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
@@ -1689,7 +1701,12 @@ function RatePage({ data, setData, toast }) {
               </div>
             </div>
           ))}
-          <Btn onClick={() => { setData(d => ({ ...d, rate: Number(jpy) })); toast("匯率已儲存 💱"); }}>儲存匯率</Btn>
+          <Btn onClick={() => {
+            const r = Number(jpy);
+            setData(d => ({ ...d, rate: r }));
+            try { localStorage.setItem("exchange_rate_jpy", String(r)); } catch(e) {}
+            toast("匯率已儲存 💱");
+          }}>儲存匯率</Btn>
         </div>
       </Card>
       <div style={{ fontWeight: 700, fontSize: 15, color: C.accentDark }}>🎰 扭蛋優惠定價</div>
@@ -2613,7 +2630,14 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
 // ─── Root ─────────────────────────────────────────────────────────
 export default function AdminRoot() {
   injectStyles();
-  const [data, setData] = useState(INIT_DATA);
+  const [data, setData] = useState(() => {
+    let savedRate = INIT_DATA.rate;
+    try {
+      const v = localStorage.getItem("exchange_rate_jpy");
+      if (v && !isNaN(Number(v))) savedRate = Number(v);
+    } catch(e) {}
+    return { ...INIT_DATA, rate: savedRate };
+  });
   const [credentials, setCredentials] = useState({ account: "admin", password: "1234" });
   const [loggedIn, setLoggedIn] = useState(false);
 
