@@ -65,8 +65,8 @@ const INIT_DATA = {
     { id: "p5", name: "吉伊卡哇手遊",   price: 0, image: "", status: "on", category: "玩具" },
   ],
   inStock: [
-    { id: "s1", name: "Hello Kitty 扭蛋 草莓款", price: 350, image: "🎀", status: "on" },
-    { id: "s2", name: "Sanrio 扭蛋 新款",         price: 280, image: "⭐", status: "on" },
+    { id: "s1", name: "Hello Kitty 鑰匙圈 草莓款", price: 350, image: "🎀", status: "on" },
+    { id: "s2", name: "Sanrio 吊飾 新款",          price: 280, image: "⭐", status: "on" },
   ],
   orders: [
     { id: "o1", no: "7346", customerId: "c1", customerName: "曉曉", status: "cancelled",     items: [{ name: "🇯🇵 7-11代購",   cost: 32,   price: 39,   qty: 1, note: "" }], total: 39,   profit: 7,   createdAt: "2026-04-16" },
@@ -75,10 +75,10 @@ const INIT_DATA = {
   ],
   wishlist: [
     { id: "w1", customerId: "c1", customerName: "曉曉", name: "限定版茶杯組",   note: "京都限定款", status: "searching" },
-    { id: "w2", customerId: "c2", customerName: "Mina", name: "Sanrio 扭蛋 新款", note: "",         status: "found" },
+    { id: "w2", customerId: "c2", customerName: "Mina", name: "Sanrio 吊飾 新款", note: "",         status: "found" },
   ],
   announcements: [
-    { id: "an1", title: "第一天（4/21）行程公告", content: "🍒 藥妝 711 吉伊卡哇手遊 高島屋土產\n✨ 08:00 SUGI藥妝（美妝為主）\n大國藥妝（藥品為主）\n── 停留1小時 ──\n✨ 09:10 7-11（拍拍零食）\n── 停留30分鐘 ──\n✨ 09:45 唐吉軻德（拍照+採買）\n── 停留1小時 ──\n✨ 11:00 難波丸井百貨\n── 停留2.5小時 ──\n✨ 21:00 扭蛋店開扭（會扭到關門23:00）" }
+    { id: "an1", title: "第一天（4/21）行程公告", content: "🍒 藥妝 711 吉伊卡哇手遊 高島屋土產\n✨ 08:00 SUGI藥妝（美妝為主）\n大國藥妝（藥品為主）\n── 停留1小時 ──\n✨ 09:10 7-11（拍拍零食）\n── 停留30分鐘 ──\n✨ 09:45 唐吉軻德（拍照+採買）\n── 停留1小時 ──\n✨ 11:00 難波丸井百貨\n── 停留2.5小時 ──\n✨ 21:00 自由活動" }
   ],
 };
 
@@ -1407,7 +1407,7 @@ function StockModal({ product, onSave, onClose }) {
     <Modal title={isEdit ? "編輯現貨" : "新增現貨"} onClose={onClose} wide>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr", gap:10 }}>
-          <Input label="商品名稱 *" value={name}  onChange={setName}  placeholder="Hello Kitty 扭蛋" />
+          <Input label="商品名稱 *" value={name}  onChange={setName}  placeholder="Hello Kitty 鑰匙圈" />
           <Input label="價格 NT$ *" type="number" value={price} onChange={setPrice} placeholder="350" />
           <Input label="圖示 Emoji" value={image} onChange={setImage} placeholder="🎀" />
         </div>
@@ -1678,49 +1678,6 @@ function AnnouncementsPage({ data, setData, toast }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function RatePage({ data, setData, toast }) {
-  const [jpy, setJpy] = useState(String(data.rate));
-  const [krw, setKrw] = useState("0.024");
-  const [usd, setUsd] = useState("32");
-  const GACHA = [{ jpy:200, ntd:60 },{ jpy:300, ntd:80 },{ jpy:400, ntd:110 },{ jpy:500, ntd:140 }];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>匯率設定</div>
-      <Card>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {[["🇯🇵 JPY 日幣", jpy, setJpy],["🇰🇷 KRW 韓幣", krw, setKrw],["🇺🇸 USD 美金", usd, setUsd]].map(([label, val, setter]) => (
-            <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{label}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: C.muted, fontSize: 13 }}>1 = NT$</span>
-                <input type="number" value={val} onChange={e => setter(e.target.value)} style={{ width: 90, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "7px 10px", color: C.text, fontSize: 14 }} />
-              </div>
-            </div>
-          ))}
-          <Btn onClick={() => {
-            const r = Number(jpy);
-            setData(d => ({ ...d, rate: r }));
-            try { localStorage.setItem("exchange_rate_jpy", String(r)); } catch(e) {}
-            toast("匯率已儲存 💱");
-          }}>儲存匯率</Btn>
-        </div>
-      </Card>
-      <div style={{ fontWeight: 700, fontSize: 15, color: C.accentDark }}>🎰 扭蛋優惠定價</div>
-      <Card>
-        <div style={{ fontSize: 13, color: C.muted, marginBottom: 14 }}>所有人都享有扭蛋連線優惠價（留蛋殼另加 NT$5）：</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {GACHA.map(g => (
-            <div key={g.jpy} style={{ background: C.purpleBg, border: `1.5px solid ${C.purple}25`, borderRadius: 14, padding: "16px 12px", textAlign: "center" }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: C.purple }}>¥{g.jpy}</div>
-              <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>NT${g.ntd}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }
