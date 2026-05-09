@@ -1161,12 +1161,22 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
   const [price, setPrice]       = useState(String(product?.price || ""));
+  const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : "");
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
-  const [variants, setVariants] = useState(product?.variants || []);
+  const [variants, setVariants] = useState(() => {
+    const initRate = Number(product?.rate) || rate || 0;
+    return (product?.variants || []).map(v => ({
+      ...v,
+      cost: v.cost != null ? v.cost : Math.round((Number(v.costJpy)||0) * initRate),
+    }));
+  });
   const [vName, setVName]       = useState("");
   const [vPrice, setVPrice]     = useState("");
   const [vCostJpy, setVCostJpy] = useState("");
   const [uploading, setUploading] = useState(false);
+
+  // 有效匯率:商品自訂優先,否則用全域
+  const effectiveRate = Number(productRate) || Number(rate) || 0;
 
   const handleImageFile = (e) => {
     const file = e.target.files?.[0];
@@ -1184,7 +1194,9 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, costJpy:Number(vCostJpy)||0 }]);
+    const jpy = Number(vCostJpy) || 0;
+    const cost = Math.round(jpy * effectiveRate);
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, costJpy:jpy, cost }]);
     setVName(""); setVPrice(""); setVCostJpy("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
@@ -1197,6 +1209,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       name: cleanName,
       category: sanitize(cat, 50),
       price: Math.max(0, Number(price)||0),
+      rate: Number(productRate) || 0,   // 0 = 用全域匯率
       image: image,
       status: product?.status || "on",
       variants,
@@ -1212,7 +1225,22 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
           <Input label="定價 NT$（0 = 洽詢）" type="number" value={price} onChange={setPrice} placeholder="0" />
-          <div />
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>本商品匯率（留空＝用全域 {rate || "?"}）</label>
+            <input type="number" step="0.001" value={productRate}
+              onChange={e => {
+                const newStr = e.target.value;
+                setProductRate(newStr);
+                const newRate = Number(newStr) || Number(rate) || 0;
+                setVariants(vs => vs.map(v => ({
+                  ...v,
+                  cost: Math.round((Number(v.costJpy)||0) * newRate),
+                })));
+              }}
+              placeholder={`預設 ${rate || "0"}`}
+              style={{ width:"100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }} />
+            <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>目前 ¥1 = NT${effectiveRate || "?"}，影響本商品所有款式成本</div>
+          </div>
         </div>
 
         {/* Image upload section */}
@@ -1266,13 +1294,11 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
             例如：顏色（紅色、藍色）、尺寸（S / M / L）<br/>客人下單時可從中選擇
           </div>
           <div style={{ fontSize:11, color:C.muted, marginBottom:12, padding:"6px 10px", background:C.accentBg, borderRadius:6, border:`1px solid ${C.border}` }}>
-            💱 成本＝日幣價格 × 匯率（目前 ¥1 = NT${rate || "?"}），可在頁面右上方修改匯率
+            💱 成本預設＝日幣 × 匯率（目前 ¥1 = NT${effectiveRate || "?"}），也可直接修改下方成本欄位
           </div>
           {variants.length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
-              {variants.map(v => {
-                const calcCost = Math.round((Number(v.costJpy)||0) * (Number(rate)||0));
-                return (
+              {variants.map(v => (
                 <div key={v.id} style={{ display:"flex", alignItems:"flex-end", gap:8, padding:"10px 12px", background:C.bgDeep, borderRadius:8, border:`1px solid ${C.border}` }}>
                   <div style={{ flex:1.4, fontSize:13, fontWeight:600, paddingBottom:6 }}>{v.name}</div>
                   <div style={{ flex:1 }}>
@@ -1284,18 +1310,23 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>日幣價格 ¥</div>
                     <input type="number" value={v.costJpy||0}
-                      onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, costJpy:Number(e.target.value)||0} : x))}
+                      onChange={e => {
+                        const newJpy = Number(e.target.value) || 0;
+                        setVariants(vs => vs.map(x => x.id===v.id
+                          ? { ...x, costJpy: newJpy, cost: Math.round(newJpy * effectiveRate) }
+                          : x));
+                      }}
                       style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12 }}/>
                   </div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>成本 NT$ <span style={{ color:C.accent }}>(自動)</span></div>
-                    <input type="text" readOnly value={calcCost}
-                      style={{ width:"100%", background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12, color:C.red, fontWeight:600 }}/>
+                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>成本 NT$</div>
+                    <input type="number" value={v.cost||0}
+                      onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, cost:Number(e.target.value)||0} : x))}
+                      style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12, color:C.red, fontWeight:600 }}/>
                   </div>
                   <button onClick={() => removeVariant(v.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:16, flexShrink:0, paddingBottom:6 }}>×</button>
                 </div>
-                );
-              })}
+              ))}
             </div>
           )}
           <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
