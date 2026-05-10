@@ -814,6 +814,21 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
                     </div>
                     <div style={{ fontSize:15, fontWeight:700, color:o.deposit_paid?C.green:C.amber }}>{fmtMoney(deposit)}</div>
                   </div>
+                  {!o.deposit_paid && (
+                    <button onClick={async (e) => {
+                      e.stopPropagation();
+                      const beforePurchase = !o.status || ["pending_review", "cancelled"].includes(o.status);
+                      const updateData = { deposit_paid: true };
+                      if (beforePurchase) updateData.status = "pending";
+                      const { error } = await supabase.from("orders").update(updateData).eq("id", o.id);
+                      if (error) { if (toast) toast("更新失敗"); return; }
+                      setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, ...updateData } : x) }));
+                      if (toast) toast(updateData.status === "pending" ? "✅ 已收訂金，訂單轉為「待採買」" : "✅ 已標記為訂金已收");
+                    }}
+                      style={{ marginTop:10, width:"100%", padding:"7px 12px", background:C.green, color:"#fff", border:"none", borderRadius:8, fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                      ✓ 標記訂金已收
+                    </button>
+                  )}
                 </div>
               )}
               {/* 尾款紀錄 */}
@@ -2256,12 +2271,9 @@ function PaymentFields({ order: o, setData, toast }) {
       deposit:        Number(form.deposit) || 0,
       final_payment:  Math.max(0, total + (Number(form.shipping_fee)||0) - (Number(form.deposit)||0)),
     };
-    // 付訂金 → 待採買
-    if (form.deposit_paid && (o.status === "pending_review" || !o.status)) {
-      updateData.status = "pending";
-    }
-    // 尾款付清 → 待採買（若尚未採買）
-    if (form.final_paid && o.status === "pending_review") {
+    // 訂金/尾款已收 → 自動跳到「待採買」(若狀態還在採買前)
+    const beforePurchase = !o.status || ["pending_review", "cancelled"].includes(o.status);
+    if ((form.deposit_paid || form.final_paid) && beforePurchase) {
       updateData.status = "pending";
     }
     const { error } = await supabase.from("orders").update(updateData).eq("id", o.id);
