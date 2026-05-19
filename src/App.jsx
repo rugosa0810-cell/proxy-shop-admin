@@ -10,40 +10,73 @@ const APP_NAME = "Muulie Studio";
 const LOGO_SRC = "data:image/png;base64,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";
 
 // ─── 奶茶色系 Korean Milk Tea ────────────────────────────────────
+// ─── 莫蘭迪粉色主題 ─────────────────────────────────────────
 const C = {
-  bg:        "#faf6f1",
-  bgDeep:    "#f3ede4",
-  bgDark:    "#2c1f14",
-  surface:   "#fffdf9",
-  border:    "#e8ddd0",
-  borderSoft:"#ede5d8",
-  text:      "#3a2e24",
-  textMid:   "#7a6555",
-  muted:     "#b0998a",
-  faint:     "#d5c8ba",
-  accent:    "#b5836a",
-  accentDark:"#8f5f47",
-  accentLight:"#d4a98a",
-  accentBg:  "#f5ece3",
-  green:     "#5a9e72",  greenBg:  "#edf5f0", greenDark:"#3d7a54",
-  yellow:    "#c49a3c",  yellowBg: "#fdf6e3",
-  red:       "#c06060",  redBg:    "#fdf0f0",
-  blue:      "#6a8caf",  blueBg:   "#eef3f9",
-  purple:    "#9b7fb6",  purpleBg: "#f5f0f9",
-  orange:    "#d4894a",  orangeBg: "#fdf3eb",
-  teal:      "#4a9e9e",  tealBg:   "#edf5f5",
-  shadow:    "0 2px 16px rgba(90,60,30,0.08)",
-  shadowMd:  "0 4px 28px rgba(90,60,30,0.12)",
-  shadowLg:  "0 8px 40px rgba(90,60,30,0.16)",
+  // 背景層
+  bg:        "#faf2ee",  // 主背景:奶杏白
+  bgDeep:    "#f4ebe5",  // 第二層:霧粉米
+  bgCard:    "#ffffff",  // 卡片底:純白
+  bgDark:    "#3d2e2a",
+  surface:   "#fdf7f3",
+  // 邊框
+  border:    "#eed8d2",
+  borderSoft:"#f4e0dc",
+  borderDeep:"#d8c2c0",
+  // 文字
+  text:      "#4a3a38",  // 主文字:暖深棕
+  textMid:   "#7a6258",  // 副文字
+  muted:     "#a89890",  // 提示
+  faint:     "#c4a8a4",  // 最淡:留白裝飾
+  // 強調色 (奶咖啡)
+  accent:    "#a8847e",
+  accentDark:"#8b6258",
+  accentLight:"#c4a094",
+  accentBg:  "#fdf5f2",  // 強調區塊底
+  // 狀態色 (莫蘭迪低飽和)
+  green:     "#9eb098",  greenBg:  "#e0eadc",  greenDark:"#7d9576",  // 已採買/利潤
+  yellow:    "#c4a878",  yellowBg: "#f6ecd8",
+  red:       "#c47a78",  redBg:    "#f6dcd8",
+  pink:      "#d49890",  pinkBg:   "#fdebe6",  pinkDark: "#b87166",  // 待採買
+  blue:      "#8a9fa8",  blueBg:   "#e0e8eb",
+  purple:    "#a89098",  purpleBg: "#ede4e8",                        // 待審核(灰紫)
+  orange:    "#c4937e",  orangeBg: "#f6e4dc",
+  teal:      "#8aa8a8",  tealBg:   "#dceaea",
+  shadow:    "0 2px 16px rgba(170,140,140,0.08)",
+  shadowMd:  "0 4px 24px rgba(170,140,140,0.12)",
+  shadowLg:  "0 8px 36px rgba(170,140,140,0.16)",
+  // 圓角
+  rXs: 8, rSm: 12, rMd: 16, rLg: 20, rPill: 99,
 };
 
+// ─── 響應式工具 ─────────────────────────────────────────────
+const BREAKPOINTS = { mobile: 640, tablet: 1024 };
+function useBreakpoint() {
+  const [bp, setBp] = useState(() => {
+    if (typeof window === "undefined") return "desktop";
+    const w = window.innerWidth;
+    if (w < BREAKPOINTS.mobile) return "mobile";
+    if (w < BREAKPOINTS.tablet) return "tablet";
+    return "desktop";
+  });
+  useEffect(() => {
+    const onResize = () => {
+      const w = window.innerWidth;
+      setBp(w < BREAKPOINTS.mobile ? "mobile" : w < BREAKPOINTS.tablet ? "tablet" : "desktop");
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return bp;
+}
+const isMobile = (bp) => bp === "mobile";
+
 const ORDER_STATUS = {
-  pending_review: { label: "待審核",   color: C.blue,   bg: C.blueBg,   icon: "📋" },
-  pending:        { label: "待採買",   color: C.amber,  bg: C.amberBg,  icon: "⏳" },
-  bought:         { label: "已採買",   color: C.green,  bg: C.greenBg,  icon: "✅" },
-  arrived:        { label: "已到台",   color: C.accent, bg: C.accentBg, icon: "📦" },
-  shipped:        { label: "已寄出",   color: C.purple, bg: C.purpleBg, icon: "🚚" },
-  cancelled:      { label: "已取消",   color: C.red,    bg: C.redBg,    icon: "❌" },
+  pending_review: { label: "待審核",   color: "#7a6e80", bg: C.purpleBg, icon: "clipboard-list" },
+  pending:        { label: "待採買",   color: C.pinkDark,bg: C.pinkBg,   icon: "clock-hour-4" },
+  bought:         { label: "已採買",   color: C.greenDark,bg: C.greenBg, icon: "check" },
+  arrived:        { label: "已到台",   color: C.accentDark,bg: C.accentBg,icon: "package" },
+  shipped:        { label: "已寄出",   color: "#8a7fa8", bg: "#ebe4f0",  icon: "truck-delivery" },
+  cancelled:      { label: "已取消",   color: C.red,    bg: C.redBg,    icon: "x" },
 };
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -85,47 +118,88 @@ const INIT_DATA = {
 // ─── Styles ──────────────────────────────────────────────────────
 const injectStyles = () => {
   if (document.getElementById("ad-styles")) return;
+  // Tabler Icons CDN
+  if (!document.getElementById("tabler-icons")) {
+    const lk = document.createElement("link");
+    lk.id = "tabler-icons";
+    lk.rel = "stylesheet";
+    lk.href = "https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.14.0/dist/tabler-icons.min.css";
+    document.head.appendChild(lk);
+  }
   const s = document.createElement("style");
   s.id = "ad-styles";
   s.textContent = `
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;900&family=DM+Serif+Display:ital@0;1&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&display=swap');
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:${C.bg};color:${C.text};font-family:'Noto Sans TC',sans-serif;min-height:100vh}
-    ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-thumb{background:${C.faint};border-radius:99px}
-    input,select,textarea,button{font-family:inherit;outline:none}
+    body{background:${C.bg};color:${C.text};font-family:'Noto Sans TC',sans-serif;min-height:100vh;-webkit-text-size-adjust:100%}
+    ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-thumb{background:${C.faint};border-radius:99px}
+    input,select,textarea,button{font-family:inherit;outline:none;font-size:14px}
+    /* 手機上 iOS 自動放大避免:input 字至少 16px */
+    @media (max-width:640px) {
+      input,select,textarea{font-size:16px!important}
+    }
     .fade{animation:fadeUp .3s cubic-bezier(.16,1,.3,1) both}
     @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-    .tab-ul{border-bottom:2px solid ${C.border};display:flex;overflow-x:auto;scrollbar-width:none}
+    .tab-ul{display:flex;overflow-x:auto;scrollbar-width:none;gap:6px}
     .tab-ul::-webkit-scrollbar{display:none}
-    .tab-btn{padding:10px 16px;border:none;background:transparent;color:${C.muted};font-weight:600;font-size:14px;white-space:nowrap;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .18s}
-    .tab-btn.active{color:${C.accentDark};border-bottom-color:${C.accent}}
-    .pill{display:inline-flex;align-items:center;gap:4px;padding:3px 11px;border-radius:99px;font-size:12px;font-weight:700}
-    .row-hover:hover{background:${C.bgDeep}!important}
+    .tab-btn{padding:6px 14px;border:0.5px solid ${C.borderDeep};background:transparent;color:${C.text};font-weight:500;font-size:13px;white-space:nowrap;cursor:pointer;border-radius:99px;transition:all .15s}
+    .tab-btn.active{color:#fff;background:${C.accent};border-color:${C.accent}}
+    .pill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:500}
+    .pill i{font-size:12px}
+    .row-hover{transition:background .15s} .row-hover:hover{background:${C.bgDeep}}
+    .ti{font-style:normal}
+    /* 底部分頁 */
+    .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:0.5px solid ${C.border};display:flex;justify-content:space-around;padding:10px 0 max(16px, env(safe-area-inset-bottom));z-index:90}
+    .nav-item{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 14px;cursor:pointer;color:${C.borderDeep};transition:color .15s}
+    .nav-item.active{color:${C.accent}}
+    .nav-item i{font-size:22px} .nav-item span{font-size:10px}
+    .nav-item.active span{font-weight:500}
+    /* 卡片 */
+    .card{background:${C.bgCard};border-radius:${C.rMd}px;border:0.5px solid ${C.border};padding:14px 16px}
+    .card-tappable{cursor:pointer;transition:transform .12s,box-shadow .15s}
+    .card-tappable:active{transform:scale(.99)}
     @keyframes shakeX{0%,100%{transform:none}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
     @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+    /* Modal/Sheet 底部抽屜 */
+    .sheet-backdrop{position:fixed;inset:0;background:rgba(74,58,56,.45);z-index:100;display:flex;align-items:flex-end;animation:fadeIn .2s ease}
+    .sheet-content{background:#fff;width:100%;max-height:90vh;border-radius:24px 24px 0 0;overflow:hidden;display:flex;flex-direction:column;animation:slideUp .25s cubic-bezier(.16,1,.3,1)}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes slideUp{from{transform:translateY(100%)}to{transform:none}}
+    .sheet-handle{width:36px;height:4px;background:${C.border};border-radius:99px;margin:10px auto 6px}
   `;
   document.head.appendChild(s);
 };
 
 // ─── Atoms ───────────────────────────────────────────────────────
-const StatusBadge = ({ status }) => {
+const Icon = ({ name, size = 16, color, style: sx }) => (
+  <i className={`ti ti-${name}`} style={{ fontSize: size, color, lineHeight: 1, ...sx }} aria-hidden="true" />
+);
+
+const StatusBadge = ({ status, sm }) => {
   const s = ORDER_STATUS[status] || ORDER_STATUS.pending;
-  return <span className="pill" style={{ background: s.bg, color: s.color, border: `1px solid ${s.color}25` }}>{s.icon} {s.label}</span>;
+  return <span className="pill" style={{ background: s.bg, color: s.color, fontSize: sm ? 10 : 11, padding: sm ? "3px 8px" : "4px 10px" }}>
+    <Icon name={s.icon} size={sm ? 11 : 12} /> {s.label}
+  </span>;
 };
 
-const Btn = ({ children, onClick, variant = "primary", sm, style: sx, disabled }) => {
+const Btn = ({ children, onClick, variant = "primary", sm, style: sx, disabled, icon }) => {
   const v = {
-    primary: { background: C.accent, color: "#fff", border: "none", boxShadow: `0 2px 8px ${C.accent}40` },
-    soft:    { background: C.accentBg, color: C.accentDark, border: `1.5px solid ${C.accentLight}50` },
-    ghost:   { background: "transparent", color: C.muted, border: `1.5px solid ${C.border}` },
-    danger:  { background: C.redBg, color: C.red, border: `1.5px solid ${C.red}30` },
-    success: { background: C.greenBg, color: C.greenDark, border: `1.5px solid ${C.green}30` },
+    primary: { background: C.accent, color: "#fff", border: "none" },
+    soft:    { background: C.accentBg, color: C.accentDark, border: `0.5px solid ${C.border}` },
+    ghost:   { background: "transparent", color: C.textMid, border: `0.5px solid ${C.borderDeep}` },
+    danger:  { background: C.redBg, color: C.red, border: `0.5px solid ${C.red}40` },
+    success: { background: C.green, color: "#fff", border: "none" },
+    pinkSoft:{ background: C.pinkBg, color: C.pinkDark, border: `0.5px solid ${C.pink}40` },
   };
   return (
-    <button onClick={onClick} disabled={disabled} style={{ padding: sm ? "6px 14px" : "10px 20px", borderRadius: 10, fontWeight: 600, fontSize: sm ? 13 : 14, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, transition: "all .16s", ...v[variant], ...sx }}
-      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.opacity = ".82"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-      onMouseLeave={e => { e.currentTarget.style.opacity = disabled ? ".5" : "1"; e.currentTarget.style.transform = "none"; }}
-    >{children}</button>
+    <button onClick={onClick} disabled={disabled}
+      style={{ padding: sm ? "7px 14px" : "11px 20px", borderRadius: sm ? 10 : 12, fontWeight: 500, fontSize: sm ? 12 : 13, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, transition: "all .15s", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, ...v[variant], ...sx }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.opacity = ".88"; }}
+      onMouseLeave={e => { e.currentTarget.style.opacity = disabled ? ".5" : "1"; }}
+    >
+      {icon && <Icon name={icon} size={sm ? 13 : 15} />}
+      {children}
+    </button>
   );
 };
 
@@ -497,97 +571,156 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     setTab("orders");
   };
 
-  const TABS = [
-    { id: "orders",        label: "訂單管理" },
-    { id: "catalog",       label: "賣場管理" },
-    { id: "instock",       label: "🏪 現貨" },
-    { id: "wishlist",      label: "許願清單" },
-    { id: "customers",     label: "客人管理" },
-    { id: "archive",       label: "📦 封存" },
-    { id: "settings",      label: "🔐 帳號設定" },
-    { id: "auditlog",      label: "🛡️ 操作日誌" },
+  const TABS_PRIMARY = [
+    { id: "orders",    label: "訂單",   icon: "clipboard-list" },
+    { id: "catalog",   label: "賣場",   icon: "shopping-bag" },
+    { id: "customers", label: "客人",   icon: "users" },
+    { id: "more",      label: "更多",   icon: "grid-dots" },
+  ];
+  const TABS_MORE = [
+    { id: "instock",   label: "現貨",       icon: "package" },
+    { id: "wishlist",  label: "許願清單",   icon: "star" },
+    { id: "archive",   label: "封存區",     icon: "archive" },
+    { id: "auditlog",  label: "操作日誌",   icon: "shield" },
+    { id: "settings",  label: "帳號設定",   icon: "settings" },
   ];
 
+  const bp = useBreakpoint();
+  const mobile = isMobile(bp);
+
+  // 取得目前頁的標題(顯示在頂部)
+  const allTabs = [...TABS_PRIMARY, ...TABS_MORE];
+  const currentTab = allTabs.find(t => t.id === tab) || TABS_PRIMARY[0];
+
   return (
-    <div style={{ minHeight: "100vh", background: C.bg }}>
+    <div style={{ minHeight: "100vh", background: C.bg, paddingBottom: mobile ? 78 : 0, maxWidth: mobile ? 540 : "none", margin: "0 auto" }}>
       {/* Session warning banner */}
       {sessionWarning && (
-        <div style={{ background: C.yellow, color: "#fff", padding: "10px 20px", textAlign: "center", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
-          ⏰ 已閒置 25 分鐘，5 分鐘後將自動登出
-          <button onClick={() => { setSessionWarning(false); }} style={{ background: "rgba(255,255,255,.3)", border: "none", color: "#fff", padding: "4px 12px", borderRadius: 99, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>繼續工作</button>
+        <div style={{ background: C.yellow, color: "#fff", padding: "10px 20px", textAlign: "center", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
+          已閒置 25 分鐘，5 分鐘後將自動登出
+          <button onClick={() => { setSessionWarning(false); }} style={{ background: "rgba(255,255,255,.3)", border: "none", color: "#fff", padding: "4px 12px", borderRadius: 99, fontWeight: 500, cursor: "pointer", fontSize: 12 }}>繼續工作</button>
         </div>
       )}
 
-      {/* Top bar */}
-      <div style={{ background: C.surface, borderBottom: `1.5px solid ${C.border}`, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: sessionWarning ? 45 : 0, zIndex: 50 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={LOGO_SRC} alt="logo" style={{ width:38, height:38, objectFit:"contain" }} />
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: C.accentDark, fontFamily: "'DM Serif Display',serif" }}>{APP_NAME}</div>
-            <div style={{ fontSize: 11, color: C.muted }}>登入：{credentials.account}</div>
+      {/* Top bar — 手機版簡潔 */}
+      <div style={{ background: C.bg, padding: mobile ? "14px 18px 12px" : "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: sessionWarning ? 41 : 0, zIndex: 50, borderBottom: mobile ? "none" : `0.5px solid ${C.border}` }}>
+        <div>
+          <div style={{ fontSize: 9, color: C.faint, letterSpacing: 2.5, fontWeight: 500 }}>MUULIE STUDIO</div>
+          <div style={{ fontSize: mobile ? 22 : 18, fontWeight: 400, color: C.text, marginTop: 3, letterSpacing: .5 }}>
+            {currentTab.label}{tab === "more" ? "" : ""}
           </div>
         </div>
-        <Btn sm variant="danger" onClick={() => { logAction("手動登出"); onLogout(); }}>登出</Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {!mobile && <div style={{ fontSize: 11, color: C.muted, marginRight: 8 }}>登入：{credentials.account}</div>}
+          <button onClick={() => { logAction("手動登出"); onLogout(); }}
+            style={{ width: 36, height: 36, borderRadius: "50%", background: C.bgDeep, border: "none", color: C.textMid, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="logout" size={17} />
+          </button>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="tab-ul" style={{ padding: "0 16px", background: C.surface, position: "sticky", top: sessionWarning ? 114 : 69, zIndex: 40 }}>
-        {TABS.map(t => <button key={t.id} className={`tab-btn${tab === t.id ? " active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>)}
-      </div>
+      {/* 桌面版才顯示的橫向 tabs */}
+      {!mobile && (
+        <div className="tab-ul" style={{ padding: "10px 16px", background: C.bg, position: "sticky", top: sessionWarning ? 102 : 61, zIndex: 40, borderBottom: `0.5px solid ${C.border}` }}>
+          {[...TABS_PRIMARY.filter(t => t.id !== "more"), ...TABS_MORE].map(t =>
+            <button key={t.id} className={`tab-btn${tab === t.id ? " active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>
+          )}
+        </div>
+      )}
 
-      {/* Stats — 點擊可篩選訂單 */}
-      <div style={{ padding: "16px 16px 8px", display: "flex", gap: 10 }}>
-        {[
-          { icon: "📋", val: totalOrders,  label: "總訂單",   filter: "all",     color: C.text   },
-          { icon: "⏳", val: pendingBuy,   label: "待購買",   filter: "pending", color: C.orange },
-          { icon: "✅", val: bought,       label: "已採買",   filter: "bought",  color: C.green  },
-          { icon: "💰", val: `NT$${profit.toLocaleString()}`, label: "預估利潤", filter: null, color: C.accent },
-        ].map((s, i) => {
-          const isActive = s.filter && tab === "orders" && orderFilter === s.filter;
-          return (
-            <div key={i}
-              onClick={() => s.filter && goFilter(s.filter)}
-              style={{
-                flex: 1, background: isActive ? C.accentBg : C.surface,
-                border: `1.5px solid ${isActive ? C.accent : C.border}`,
-                borderRadius: 14, padding: "12px 8px", textAlign: "center",
-                boxShadow: isActive ? C.shadowMd : C.shadow,
-                cursor: s.filter ? "pointer" : "default",
-                transition: "all .18s",
-                transform: isActive ? "translateY(-2px)" : "none",
-              }}
-              onMouseEnter={e => { if(s.filter) e.currentTarget.style.boxShadow = C.shadowMd; }}
-              onMouseLeave={e => { if(s.filter) e.currentTarget.style.boxShadow = isActive ? C.shadowMd : C.shadow; }}
-            >
-              <div style={{ fontSize: 18 }}>{s.icon}</div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: s.color, fontFamily: "'DM Serif Display',serif", marginTop: 2 }}>{s.val}</div>
-              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{s.label}</div>
-              {s.filter && <div style={{ fontSize: 9, color: isActive ? C.accent : C.faint, marginTop: 3, fontWeight: 600 }}>{isActive ? "▲ 篩選中" : "點擊篩選"}</div>}
-            </div>
-          );
-        })}
-      </div>
+      {/* 桌面版的統計卡(手機收起來,訂單頁裡會有自己的篩選方塊) */}
+      {!mobile && (
+        <div style={{ padding: "16px 16px 8px", display: "flex", gap: 10 }}>
+          {[
+            { icon: "clipboard-list", val: totalOrders, label: "總訂單", filter: "all", color: C.text },
+            { icon: "clock-hour-4",   val: pendingBuy,  label: "待採買", filter: "pending", color: C.pinkDark },
+            { icon: "check",          val: bought,      label: "已採買", filter: "bought",  color: C.greenDark },
+            { icon: "coin",           val: `NT$${profit.toLocaleString()}`, label: "預估利潤", filter: null, color: C.accent },
+          ].map((s, i) => {
+            const isActive = s.filter && tab === "orders" && orderFilter === s.filter;
+            return (
+              <div key={i} onClick={() => s.filter && goFilter(s.filter)}
+                style={{ flex: 1, background: isActive ? C.accent : C.bgCard, color: isActive ? "#fff" : C.text, border: `0.5px solid ${isActive ? C.accent : C.border}`, borderRadius: 14, padding: "13px 8px", textAlign: "center", cursor: s.filter ? "pointer" : "default", transition: "all .15s" }}>
+                <Icon name={s.icon} size={18} color={isActive ? "#fff" : s.color} />
+                <div style={{ fontWeight: 500, fontSize: 16, color: isActive ? "#fff" : s.color, marginTop: 4 }}>{s.val}</div>
+                <div style={{ fontSize: 10, marginTop: 2, opacity: isActive ? .85 : .6 }}>{s.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Page content */}
-      <div style={{ padding: "8px 16px 60px" }}>
-        {tab === "orders"        && <OrdersPage        data={data} setData={setData} toast={showToast} initialFilter={orderFilter} onFilterChange={setOrderFilter} />}
+      <div style={{ padding: mobile ? "0" : "8px 16px 60px" }}>
+        {tab === "orders"        && <OrdersPage        data={data} setData={setData} toast={showToast} initialFilter={orderFilter} onFilterChange={setOrderFilter} mobile={mobile} />}
         {tab === "review"        && <ReviewPage        data={data} setData={setData} toast={showToast} />}
-        {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} />}
+        {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} mobile={mobile} />}
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
-        {tab === "archive"       && <ArchivePage data={data} setData={setData} toast={showToast} />}
+        {tab === "archive"       && <ArchivePage       data={data} setData={setData} toast={showToast} />}
         {tab === "auditlog"      && <AuditLogPage />}
+        {tab === "more"          && <MorePage tabs={TABS_MORE} onSelect={setTab} onLogout={onLogout} credentials={credentials} />}
       </div>
+
+      {/* 手機底部分頁 */}
+      {mobile && (
+        <div className="bottom-nav">
+          {TABS_PRIMARY.map(t => {
+            const active = t.id === "more"
+              ? ["more", ...TABS_MORE.map(x => x.id)].includes(tab)
+              : tab === t.id;
+            return (
+              <button key={t.id} className={`nav-item${active ? " active" : ""}`} onClick={() => setTab(t.id)}>
+                <Icon name={t.icon} size={22} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
 
+// ─── More Page (手機版「更多」抽屜式選單) ────────────────────
+function MorePage({ tabs, onSelect, onLogout, credentials }) {
+  return (
+    <div style={{ padding: "8px 16px 24px" }}>
+      <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1.5, padding: "8px 4px 12px" }}>更多功能</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => onSelect(t.id)}
+            className="row-hover"
+            style={{ background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", color: C.text, textAlign: "left" }}>
+            <div style={{ width: 38, height: 38, borderRadius: 10, background: C.bgDeep, display: "flex", alignItems: "center", justifyContent: "center", color: C.accent }}>
+              <Icon name={t.icon} size={18} />
+            </div>
+            <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{t.label}</div>
+            <Icon name="chevron-right" size={16} color={C.faint} />
+          </button>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1.5, padding: "20px 4px 12px" }}>帳號</div>
+      <div style={{ background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: "12px 16px" }}>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>目前登入</div>
+        <div style={{ fontSize: 14, color: C.text, fontWeight: 500 }}>{credentials.account}</div>
+      </div>
+
+      <button onClick={() => { logAction("手動登出"); onLogout(); }}
+        style={{ width: "100%", marginTop: 16, padding: "13px", background: C.redBg, color: C.red, border: `0.5px solid ${C.red}40`, borderRadius: 14, fontSize: 14, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <Icon name="logout" size={16} /> 登出
+      </button>
+    </div>
+  );
+}
+
 // ─── Pages ───────────────────────────────────────────────────────
-function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChange }) {
+function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChange, mobile }) {
   const [filter, setFilter] = useState(initialFilter);
   const [showAdd, setShowAdd] = useState(false);
   const STATUS_KEYS = ["all","pending_review","pending","bought","shipped","arrived","cancelled"];
@@ -601,6 +734,11 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
     setFilter(s);
     if (onFilterChange) onFilterChange(s);
   };
+
+  // 統計數字
+  const totalCount = data.orders.filter(o => !o.archived).length;
+  const pendingCount = data.orders.filter(o => !o.archived && o.status === "pending").length;
+  const boughtCount = data.orders.filter(o => !o.archived && o.status === "bought").length;
 
   const updateStatus = async (id, status) => {
     const safeS = safeStatus(status);
@@ -620,49 +758,59 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>
-          訂單管理
-          {filter !== "all" && (
-            <span style={{ marginLeft:8, fontSize:12, color:C.accent, fontWeight:600 }}>
-              — {ORDER_STATUS[filter]?.label}（{filtered.length} 筆）
-            </span>
-          )}
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: mobile ? "0 16px" : 0 }}>
+      {/* 手機版頂部:可點統計方塊(3 個) */}
+      {mobile && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 4 }}>
+          {[
+            { val: totalCount, label: "全部", filter: "all", color: C.text },
+            { val: pendingCount, label: "待採買", filter: "pending", color: C.pinkDark },
+            { val: boughtCount, label: "已採買", filter: "bought", color: C.greenDark },
+          ].map(s => {
+            const active = filter === s.filter;
+            return (
+              <button key={s.filter} onClick={() => changeFilter(s.filter)}
+                style={{ padding: "13px 8px", borderRadius: 14, textAlign: "center", cursor: "pointer", transition: "all .15s", background: active ? C.accent : C.bgCard, color: active ? "#fff" : C.text, border: `0.5px solid ${active ? C.accent : C.border}` }}>
+                <div style={{ fontSize: 20, fontWeight: 500, color: active ? "#fff" : s.color }}>{s.val}</div>
+                <div style={{ fontSize: 10, marginTop: 2, opacity: active ? .85 : .65 }}>{s.label}</div>
+              </button>
+            );
+          })}
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn sm variant="success" onClick={() => { exportCSV(data.orders); toast("CSV 已匯出 📊"); }}>📊 匯出 CSV</Btn>
-          <Btn sm onClick={() => setShowAdd(true)}>＋ 新增訂單</Btn>
-        </div>
-      </div>
+      )}
 
-      {/* 篩選按鈕列 */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {STATUS_KEYS.map(s => {
+      {/* 篩選按鈕列(其他細部狀態) */}
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none", paddingBottom: 2 }}>
+        {STATUS_KEYS.filter(s => mobile ? !["all","pending","bought"].includes(s) : true).map(s => {
           const count = s === "all" ? data.orders.length : data.orders.filter(o => o.status === s).length;
           const isActive = filter === s;
           return (
-            <button key={s} onClick={() => changeFilter(s)} style={{
-              padding: "6px 14px", borderRadius: 99,
-              border: `1.5px solid ${isActive ? C.accent : C.border}`,
-              background: isActive ? C.accentBg : "transparent",
-              color: isActive ? C.accentDark : C.muted,
-              fontSize: 12, fontWeight: 600, cursor: "pointer",
-              transition: "all .15s",
-            }}>
+            <button key={s} onClick={() => changeFilter(s)} className={`tab-btn${isActive ? " active" : ""}`}>
               {s === "all" ? "全部" : ORDER_STATUS[s]?.label}
-              <span style={{ marginLeft:5, fontSize:11, opacity:.7 }}>({count})</span>
+              <span style={{ marginLeft: 4, fontSize: 11, opacity: .7 }}>({count})</span>
             </button>
           );
         })}
       </div>
 
+      {/* 操作列 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ fontSize: 11, color: C.muted }}>
+          顯示 <span style={{ color: C.text, fontWeight: 500 }}>{filtered.length}</span> 筆
+          {filter !== "all" && ` · ${ORDER_STATUS[filter]?.label}`}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {!mobile && <Btn sm variant="ghost" icon="file-export" onClick={() => { exportCSV(data.orders); toast("CSV 已匯出"); }}>匯出</Btn>}
+          <Btn sm icon="plus" onClick={() => setShowAdd(true)}>新增訂單</Btn>
+        </div>
+      </div>
+
       {filtered.length === 0 && (
-        <Card style={{ textAlign:"center", padding:32, color:C.muted }}>
-          <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
-          <div>此狀態沒有訂單</div>
-          <Btn sm variant="ghost" style={{ marginTop:12 }} onClick={() => changeFilter("all")}>顯示全部</Btn>
-        </Card>
+        <div style={{ textAlign: "center", padding: "48px 24px", color: C.muted, background: C.bgCard, borderRadius: 16, border: `0.5px solid ${C.border}` }}>
+          <Icon name="package-off" size={32} color={C.faint} />
+          <div style={{ marginTop: 8, fontSize: 13 }}>此狀態沒有訂單</div>
+          <Btn sm variant="ghost" style={{ marginTop: 12 }} onClick={() => changeFilter("all")}>顯示全部</Btn>
+        </div>
       )}
       {filtered.map(o => <OrderCard key={o.id} o={o} updateStatus={updateStatus} del={del} setData={setData} toast={toast} />)}
       {showAdd && <AddOrderModal data={data} setData={setData} onClose={() => setShowAdd(false)} toast={toast} />}
@@ -687,7 +835,7 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
   const payStatus = () => {
     if (o.final_paid) return { label:"尾款已付", color:C.green, bg:C.greenBg };
     if (o.deposit_paid) return { label:"已付訂金", color:C.accent, bg:C.accentBg };
-    return { label:"未付款", color:C.amber, bg:C.amberBg };
+    return { label:"未付款", color:C.pinkDark, bg:C.pinkBg };
   };
   const ps = payStatus();
 
@@ -723,7 +871,7 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
 
       {/* ── 展開詳情 ── */}
       {expanded && (
-        <div style={{ borderTop:`1px solid ${C.borderLight}` }}>
+        <div style={{ borderTop:`1px solid ${C.border}` }}>
 
           {/* 區塊一：訂單概覽 */}
           <div style={{ padding:"14px 14px 10px", background:C.bgDeep }}>
@@ -800,10 +948,10 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
             <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
               {/* 訂金紀錄 */}
               {deposit > 0 && (
-                <div style={{ padding:"10px 12px", background: o.deposit_paid?C.greenBg:C.amberBg, borderRadius:10, border:`1px solid ${o.deposit_paid?C.green:C.amber}30` }}>
+                <div style={{ padding:"10px 12px", background: o.deposit_paid?C.greenBg:C.pinkBg, borderRadius:10, border:`1px solid ${o.deposit_paid?C.green:C.pinkDark}30` }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <div>
-                      <div style={{ fontSize:12, fontWeight:600, color:o.deposit_paid?C.green:C.amber }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:o.deposit_paid?C.green:C.pinkDark }}>
                         {o.deposit_paid?"✓ 訂金已收":"○ 訂金待收"}
                       </div>
                       <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
@@ -812,7 +960,7 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
                         {o.payment_date?` · ${o.payment_date}`:""}
                       </div>
                     </div>
-                    <div style={{ fontSize:15, fontWeight:700, color:o.deposit_paid?C.green:C.amber }}>{fmtMoney(deposit)}</div>
+                    <div style={{ fontSize:15, fontWeight:700, color:o.deposit_paid?C.green:C.pinkDark }}>{fmtMoney(deposit)}</div>
                   </div>
                   {!o.deposit_paid && (
                     <button onClick={async (e) => {
@@ -849,17 +997,17 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
               )}
               {/* 若無訂金/尾款，顯示一般收款狀態 */}
               {deposit===0 && shippingFee===0 && (
-                <div style={{ padding:"10px 12px", background:o.paid?C.greenBg:C.amberBg, borderRadius:10 }}>
+                <div style={{ padding:"10px 12px", background:o.paid?C.greenBg:C.pinkBg, borderRadius:10 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <div>
-                      <div style={{ fontSize:12, fontWeight:600, color:o.paid?C.green:C.amber }}>{o.paid?"✓ 已收款":"○ 未收款"}</div>
+                      <div style={{ fontSize:12, fontWeight:600, color:o.paid?C.green:C.pinkDark }}>{o.paid?"✓ 已收款":"○ 未收款"}</div>
                       <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
                         {o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":""}
                         {o.bank_code?` (${o.bank_code})`:""}
                         {o.payment_date?` · ${o.payment_date}`:""}
                       </div>
                     </div>
-                    <div style={{ fontSize:15, fontWeight:700, color:o.paid?C.green:C.amber }}>{fmtMoney(total)}</div>
+                    <div style={{ fontSize:15, fontWeight:700, color:o.paid?C.green:C.pinkDark }}>{fmtMoney(total)}</div>
                   </div>
                 </div>
               )}
@@ -871,7 +1019,7 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
           </div>
 
           {/* 操作列 */}
-          <div style={{ padding:"10px 14px", borderTop:`1px solid ${C.borderLight}`, display:"flex", justifyContent:"space-between", alignItems:"center", background:C.bgDeep }}>
+          <div style={{ padding:"10px 14px", borderTop:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", background:C.bgDeep }}>
             <div style={{ fontSize:12 }}>
               <span style={{ color:C.muted }}>成本 {fmtMoney(cost)}</span>
               <span style={{ margin:"0 6px", color:C.faint }}>·</span>
@@ -1098,18 +1246,38 @@ function CatalogPage({ data, setData, toast }) {
   };
 
   const saveNew = async (prod) => {
-    const { data: saved, error } = await supabase.from("products").insert([{ ...prod, created_at: new Date().toISOString() }]).select().single();
-    if (error) { toast("新增失敗"); return; }
+    let { data: saved, error } = await supabase.from("products").insert([{ ...prod, created_at: new Date().toISOString() }]).select().single();
+    // Fallback: 若 Supabase 沒有 rate 欄位,把 rate 拿掉重試
+    if (error && /rate/i.test(error.message || "")) {
+      const { rate, ...rest } = prod;
+      ({ data: saved, error } = await supabase.from("products").insert([{ ...rest, created_at: new Date().toISOString() }]).select().single());
+      if (!error) toast("商品已新增(rate 欄位未存,建議至 Supabase 加 rate 欄位)");
+    }
+    if (error) {
+      console.error("新增失敗:", error);
+      toast(`新增失敗:${error.message || "未知錯誤"}`);
+      return;
+    }
     setData(d => ({ ...d, products: [saved, ...d.products] }));
-    toast("商品已新增");
+    if (!/rate/i.test(error?.message || "")) toast("商品已新增");
     setShowAdd(false);
   };
 
   const saveEdit = async (prod) => {
-    const { error } = await supabase.from("products").update(prod).eq("id", prod.id);
-    if (error) { toast("儲存失敗"); return; }
+    let { error } = await supabase.from("products").update(prod).eq("id", prod.id);
+    // Fallback: 若 Supabase 沒有 rate 欄位,把 rate 拿掉重試
+    if (error && /rate/i.test(error.message || "")) {
+      const { rate, ...rest } = prod;
+      ({ error } = await supabase.from("products").update(rest).eq("id", prod.id));
+      if (!error) toast("已儲存(rate 欄位未存,建議至 Supabase 加 rate 欄位)");
+    }
+    if (error) {
+      console.error("儲存失敗:", error);
+      toast(`儲存失敗:${error.message || "未知錯誤"}`);
+      return;
+    }
     setData(d => ({ ...d, products: d.products.map(p => p.id===prod.id ? prod : p) }));
-    toast("已儲存");
+    if (!/rate/i.test(error?.message || "")) toast("已儲存");
     setEditing(null);
   };
 
@@ -1508,6 +1676,14 @@ function WishlistPage({ data, setData, toast }) {
     toast("已更新");
   };
 
+  const deleteWish = async (w) => {
+    if (!confirm(`確定要刪除 ${w.customer_name || w.customerName} 的許願「${w.name}」嗎？\n刪除後無法復原。`)) return;
+    const { error } = await supabase.from("wishlist").delete().eq("id", w.id);
+    if (error) { toast(`刪除失敗：${error.message || "未知錯誤"}`); return; }
+    setData(d => ({ ...d, wishlist: d.wishlist.filter(x => x.id !== w.id) }));
+    toast("已刪除許願");
+  };
+
   const saveQuote = async (id) => {
     const price = Math.max(0, Number(editPrice) || 0);
     const found_note = editNote.trim().slice(0, 200);
@@ -1535,11 +1711,17 @@ function WishlistPage({ data, setData, toast }) {
                 {w.link && <a href={w.link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: C.accent, display:"block", marginTop:4, wordBreak:"break-all" }}>🔗 {w.link}</a>}
                 {w.img_url && <img src={w.img_url} alt="參考圖" onError={e=>e.target.style.display="none"} style={{ width:"100%", maxHeight:140, objectFit:"cover", borderRadius:8, marginTop:8, border:`1px solid ${C.border}` }}/>}
               </div>
-              <select value={w.status} onChange={e => updateStatus(w.id, e.target.value)}
-                style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
-                <option value="searching">⭐ 許願中</option>
-                <option value="found">✅ 找到了</option>
-              </select>
+              <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink: 0 }}>
+                <select value={w.status} onChange={e => updateStatus(w.id, e.target.value)}
+                  style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
+                  <option value="searching">⭐ 許願中</option>
+                  <option value="found">✅ 找到了</option>
+                </select>
+                <button onClick={() => deleteWish(w)} title="刪除許願"
+                  style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 14, cursor: "pointer", color: C.red, lineHeight: 1 }}>
+                  🗑
+                </button>
+              </div>
             </div>
 
             {/* 已找到：顯示報價區 */}
