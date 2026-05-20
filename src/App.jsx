@@ -231,7 +231,7 @@ const Modal = ({ title, onClose, children, wide }) => (
 );
 
 const Toast = ({ msg, onDone }) => {
-  useState(() => { const t = setTimeout(onDone, 2400); return () => clearTimeout(t); });
+  useEffect(() => { const t = setTimeout(onDone, 2400); return () => clearTimeout(t); }, [onDone]);
   return (
     <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.accentDark, color: "#fff", padding: "12px 24px", borderRadius: 14, fontWeight: 600, fontSize: 14, boxShadow: C.shadowMd, zIndex: 2000, animation: "fadeUp .2s ease", whiteSpace: "nowrap" }}>✓ {msg}</div>
   );
@@ -364,14 +364,14 @@ function LoginPage({ credentials, onSuccess }) {
   const [lockInfo, setLockInfo] = useState({ locked: false, remaining: 0, attemptsLeft: 5 });
   const [loading, setLoading] = useState(false);
 
-  useState(() => {
+  useEffect(() => {
     const interval = setInterval(() => {
       const s = loginLimiter.check();
       if (s.locked) { setLockInfo({ locked: true, remaining: s.remaining, attemptsLeft: 0 }); }
       else if (lockInfo.locked) { setLockInfo(prev => ({ ...prev, locked: false })); setError(""); }
     }, 1000);
     return () => clearInterval(interval);
-  });
+  }, [lockInfo.locked]);
 
   const login = async () => {
     if (loading) return;
@@ -460,7 +460,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
   const WARNING_MS = 25 * 60 * 1000; // warn at 25 min
   const TIMEOUT_MS = 30 * 60 * 1000; // logout at 30 min
 
-  useState(() => {
+  useEffect(() => {
     let warnTimer = setTimeout(() => setSessionWarning(true), WARNING_MS);
     let logoutTimer = setTimeout(() => {
       logAction("Session 逾時自動登出");
@@ -482,10 +482,10 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       clearTimeout(warnTimer); clearTimeout(logoutTimer);
       events.forEach(e => window.removeEventListener(e, reset));
     };
-  });
+  }, []);
 
   // ── 從 Supabase 載入資料 + 即時訂閱 ─────────────────────────
-  useState(() => {
+  useEffect(() => {
     Promise.all([
       supabase.from("orders").select("*").order("created_at", { ascending: false }),
       supabase.from("products").select("*").order("created_at", { ascending: false }),
@@ -531,7 +531,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       .subscribe();
 
     return () => sub.unsubscribe();
-  });
+  }, []);
 
   // ── LINE 推播通知 ───────────────────────────────────────────
   const sendLineNotify = async (lineUserIds, message) => {
@@ -728,7 +728,7 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
   const filtered = uniqueOrders.filter(o => !o.archived).filter(o => filter === "all" || o.status === filter);
 
   // 同步外部篩選（統計卡片點擊）
-  useState(() => { setFilter(initialFilter); }, [initialFilter]);
+  useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
 
   const changeFilter = (s) => {
     setFilter(s);
