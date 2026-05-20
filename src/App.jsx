@@ -1044,35 +1044,75 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
 }
 
 function AddOrderModal({ data, setData, onClose, toast }) {
-  // 從 members 撈客人清單，沒有則從訂單聚合
+  // 1. 從 members 撈會員清單(每位會員的 line_user_id 是唯一 key)
   const memberList = (data.members || []).map(m => ({
-    id: m.line_user_id,
-    name: m.line_name || m.community_name || "未知",
+    id: m.line_user_id || m.id,
+    name: m.line_name || m.community_name || m.recipient_name || "未命名",
     communityName: m.community_name || "",
+    phone: m.phone || "",
+    isMember: true,
   }));
-  // 補上訂單中有但 members 沒有的客人
+
+  // 2. 從訂單聚合「曾下過單但不在 members 表的客人」
   const orderCustomers = [];
   const seen = new Set(memberList.map(m => m.id));
   data.orders.forEach(o => {
     const key = o.customer_line_id || o.customerId;
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      orderCustomers.push({ id: key, name: o.customer_name || o.customerName || "未知", communityName: "" });
+    const cname = o.customer_name || o.customerName;
+    if (cname) {
+      // 用 line_id 為主,沒有就用名字當 key(避免空 ID 重複)
+      const fallbackKey = key || `name:${cname}`;
+      if (!seen.has(fallbackKey)) {
+        seen.add(fallbackKey);
+        orderCustomers.push({ id: fallbackKey, name: cname, communityName: "", phone: "", isMember: false });
+      }
     }
   });
   const allCustomers = [...memberList, ...orderCustomers];
 
   const [customerId, setCustomerId] = useState(allCustomers[0]?.id || "");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
   const [items, setItems] = useState([
     { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "" }
   ]);
+
+  // 搜尋過濾
+  const filteredCustomers = searchTerm
+    ? allCustomers.filter(c =>
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.communityName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.phone.includes(searchTerm)
+      )
+    : allCustomers;
+
+  const selectedCustomer = allCustomers.find(c => c.id === customerId);
+
+  const useNewCustomer = () => {
+    const n = sanitize(newCustomerName, 50);
+    if (!n) { alert("請填寫客人姓名"); return; }
+    const tempId = `temp:${n}:${Date.now()}`;
+    setCustomerId(tempId);
+    // 把新客人塞進列表(暫時)
+    allCustomers.push({ id: tempId, name: n, communityName: "", phone: "", isMember: false });
+    setShowNewCustomer(false);
+    setNewCustomerName("");
+    setSearchTerm("");
+  };
 
   const updateItem = (id, key, val) => setItems(p => p.map(it => it.id === id ? { ...it, [key]: val } : it));
   const addItem = () => setItems(p => [...p, { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "" }]);
   const removeItem = id => setItems(p => p.filter(it => it.id !== id));
 
   const save = async () => {
-    const c = allCustomers.find(x => x.id === customerId);
+    // 取得最新的 selected (可能是剛新增的臨時客人)
+    let c = allCustomers.find(x => x.id === customerId);
+    // 臨時新增的客人在重新計算時會丟失,所以從 newCustomerName/customerId 重建
+    if (!c && customerId && customerId.startsWith("temp:")) {
+      const parts = customerId.split(":");
+      c = { id: customerId, name: parts[1] || "臨時客人", isMember: false };
+    }
     if (!c) return alert("請選擇客人");
     const validItems = items.filter(it => it.name.trim());
     if (!validItems.length) return alert("請至少填寫一項商品名稱");
@@ -1119,15 +1159,87 @@ function AddOrderModal({ data, setData, onClose, toast }) {
         {/* 選擇客人 */}
         <div>
           <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>選擇客人 *</label>
-          <select value={customerId} onChange={e => setCustomerId(e.target.value)}
-            style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, cursor: "pointer" }}>
-            {allCustomers.length === 0 && <option value="">尚無客人資料</option>}
-            {allCustomers.map(c => (
-              <option key={c.id} value={c.id}>
-                {c.name}{c.communityName ? ` (${c.communityName})` : ""}
-              </option>
-            ))}
-          </select>
+
+          {/* 已選客人顯示 */}
+          {selectedCustomer && !showNewCustomer && (
+            <div style={{ background: C.accentBg, border: `1.5px solid ${C.accent}40`, borderRadius: 10, padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#fff", color: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 600 }}>
+                {selectedCustomer.name.charAt(0)}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>{selectedCustomer.name}</div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
+                  {selectedCustomer.isMember ? "會員" : selectedCustomer.id.startsWith("temp:") ? "臨時客人" : "歷史訂單"}
+                  {selectedCustomer.communityName && ` · ${selectedCustomer.communityName}`}
+                  {selectedCustomer.phone && ` · ${selectedCustomer.phone}`}
+                </div>
+              </div>
+              <button onClick={() => setCustomerId("")} style={{ background: "none", border: "none", color: C.accent, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>更換</button>
+            </div>
+          )}
+
+          {/* 沒選 / 點更換 → 顯示搜尋 + 列表 */}
+          {(!selectedCustomer || customerId === "") && !showNewCustomer && (
+            <>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="🔍 搜尋客人姓名 / 社群 / 電話"
+                  style={{ flex: 1, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", fontSize: 13, color: C.text }}/>
+                <button onClick={() => setShowNewCustomer(true)}
+                  style={{ background: C.accent, color: "#fff", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  + 新增
+                </button>
+              </div>
+              <div style={{ maxHeight: 200, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 10, background: C.bg }}>
+                {filteredCustomers.length === 0 && (
+                  <div style={{ padding: "20px 14px", textAlign: "center", fontSize: 12, color: C.muted }}>
+                    {searchTerm ? `找不到「${searchTerm}」` : "尚無客人資料,請按「+ 新增」"}
+                  </div>
+                )}
+                {filteredCustomers.map(c => (
+                  <button key={c.id} onClick={() => { setCustomerId(c.id); setSearchTerm(""); }}
+                    className="row-hover"
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", background: "none", border: "none", borderBottom: `1px solid ${C.border}`, cursor: "pointer", textAlign: "left", color: C.text }}>
+                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.bgDeep, color: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600 }}>
+                      {c.name.charAt(0)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{c.name}</div>
+                      <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                        {c.isMember ? "會員" : "歷史訂單"}
+                        {c.communityName && ` · ${c.communityName}`}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>共 {allCustomers.length} 位客人</div>
+            </>
+          )}
+
+          {/* 新增臨時客人表單 */}
+          {showNewCustomer && (
+            <div style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>新增臨時客人</div>
+              <input value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)}
+                placeholder="客人姓名 (例如:張小姐)" autoFocus
+                onKeyDown={e => e.key === "Enter" && useNewCustomer()}
+                style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", fontSize: 14, color: C.text, marginBottom: 8 }}/>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={useNewCustomer}
+                  style={{ flex: 1, background: C.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  使用此客人
+                </button>
+                <button onClick={() => { setShowNewCustomer(false); setNewCustomerName(""); }}
+                  style={{ background: "none", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer" }}>
+                  取消
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+                💡 臨時客人不會建立會員,只用於這筆訂單
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 品項清單 */}
@@ -1285,19 +1397,7 @@ function CatalogPage({ data, setData, toast }) {
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>賣場管理</div>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 10px", background:C.accentBg, borderRadius:8, border:`1px solid ${C.border}` }}>
-            <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>💱 匯率 ¥1 = NT$</span>
-            <input type="number" step="0.001" value={data.rate || 0}
-              onChange={e => {
-                const r = Number(e.target.value) || 0;
-                setData(d => ({ ...d, rate: r }));
-                try { localStorage.setItem("exchange_rate_jpy", String(r)); } catch(err) {}
-              }}
-              style={{ width:70, background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 8px", fontSize:13, color:C.text, fontWeight:600 }} />
-          </div>
-          <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
-        </div>
+        <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
@@ -1343,7 +1443,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const isEdit = !!product;
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
-  const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : "");
+  const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : String(rate || ""));
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
   const [variants, setVariants] = useState(() => {
     const initRate = Number(product?.rate) || rate || 0;
@@ -1357,8 +1457,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [vCostJpy, setVCostJpy] = useState("");
   const [uploading, setUploading] = useState(false);
 
-  // 有效匯率:商品自訂優先,否則用全域
-  const effectiveRate = Number(productRate) || Number(rate) || 0;
+  // 本商品匯率(留空時用 0)
+  const effectiveRate = Number(productRate) || 0;
 
   const handleImageFile = (e) => {
     const file = e.target.files?.[0];
@@ -1391,7 +1491,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       name: cleanName,
       category: sanitize(cat, 50),
       price: 0,   // 已棄用,以 variants[].price 為主
-      rate: Number(productRate) || 0,   // 0 = 用全域匯率
+      rate: Number(productRate) || 0,
       image: image,
       status: product?.status || "on",
       variants,
@@ -1406,20 +1506,20 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
           <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
         </div>
         <div>
-          <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>本商品匯率（留空＝用全域 {rate || "?"}）</label>
+          <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>💱 匯率 ¥1 = NT$</label>
           <input type="number" step="0.001" value={productRate}
             onChange={e => {
               const newStr = e.target.value;
               setProductRate(newStr);
-              const newRate = Number(newStr) || Number(rate) || 0;
+              const newRate = Number(newStr) || 0;
               setVariants(vs => vs.map(v => ({
                 ...v,
                 cost: Math.round((Number(v.costJpy)||0) * newRate),
               })));
             }}
-            placeholder={`預設 ${rate || "0"}`}
-            style={{ width:"100%", maxWidth:340, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }} />
-          <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>目前 ¥1 = NT${effectiveRate || "?"}，影響本商品所有款式成本</div>
+            placeholder="例如 0.23"
+            style={{ width:"100%", maxWidth:200, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }} />
+          <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>影響本商品所有款式的成本計算</div>
         </div>
 
         {/* Image upload section */}
