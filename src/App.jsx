@@ -1075,8 +1075,32 @@ function AddOrderModal({ data, setData, onClose, toast }) {
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [items, setItems] = useState([
-    { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "" }
+    { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "", image: "" }
   ]);
+
+  // 圖片壓縮+轉 base64
+  const handleImagePick = (itId, file) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert("圖片不能超過 2MB"); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        // 壓縮成最長邊 600px
+        const canvas = document.createElement("canvas");
+        const max = 600;
+        let w = img.width, h = img.height;
+        if (w > h && w > max) { h = h * max / w; w = max; }
+        else if (h > max) { w = w * max / h; h = max; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        const data = canvas.toDataURL("image/jpeg", 0.82);
+        updateItem(itId, "image", data);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // 搜尋過濾
   const filteredCustomers = searchTerm
@@ -1102,7 +1126,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
   };
 
   const updateItem = (id, key, val) => setItems(p => p.map(it => it.id === id ? { ...it, [key]: val } : it));
-  const addItem = () => setItems(p => [...p, { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "" }]);
+  const addItem = () => setItems(p => [...p, { id: secureUid(), name: "", cost: "", price: "", qty: "1", spec: "", variant: "", image: "" }]);
   const removeItem = id => setItems(p => p.filter(it => it.id !== id));
 
   const save = async () => {
@@ -1122,7 +1146,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
       const costNum  = Math.max(0, Number(it.cost)  || 0);
       const qtyNum   = Math.max(1, Math.min(999, Number(it.qty) || 1));
       const fullName = [sanitize(it.name, 100), it.spec && sanitize(it.spec, 50), it.variant && sanitize(it.variant, 50)].filter(Boolean).join(" / ");
-      return { name: fullName, cost: costNum, price: priceNum, qty: qtyNum, note: "" };
+      return { name: fullName, cost: costNum, price: priceNum, qty: qtyNum, note: "", image: it.image || "" };
     });
 
     const total  = builtItems.reduce((s, it) => s + it.price * it.qty, 0);
@@ -1152,149 +1176,203 @@ function AddOrderModal({ data, setData, onClose, toast }) {
     }
   };
 
+  // 計算合計
+  const totalAmount = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0);
+  const itemCount = items.filter(it => it.name.trim()).length;
+
   return (
-    <Modal title="手動新增訂單" onClose={onClose} wide>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(58,46,36,.45)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="fade" style={{ background: C.bg, width: "100%", maxWidth: 540, height: "100dvh", maxHeight: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
-        {/* 選擇客人 */}
-        <div>
-          <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>選擇客人 *</label>
+        {/* Header (固定) */}
+        <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", gap: 10, borderBottom: `0.5px solid ${C.border}`, background: C.bgCard, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: "50%", background: C.bgDeep, border: "none", color: C.textMid, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="arrow-left" size={17} />
+          </button>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, color: C.faint, letterSpacing: 1.5, fontWeight: 500 }}>新增訂單</div>
+            <div style={{ fontSize: 16, fontWeight: 500, color: C.text, marginTop: 1 }}>
+              {selectedCustomer ? selectedCustomer.name : "選擇客人"}
+            </div>
+          </div>
+        </div>
 
-          {/* 已選客人顯示 */}
-          {selectedCustomer && !showNewCustomer && (
-            <div style={{ background: C.accentBg, border: `1.5px solid ${C.accent}40`, borderRadius: 10, padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#fff", color: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 600 }}>
+        {/* Body (滾動) */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+
+          {/* 客人區塊(摺疊版) */}
+          {selectedCustomer && !showNewCustomer ? (
+            <div style={{ background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accentBg, color: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600 }}>
                 {selectedCustomer.name.charAt(0)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>{selectedCustomer.name}</div>
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
-                  {selectedCustomer.isMember ? "會員" : selectedCustomer.id.startsWith("temp:") ? "臨時客人" : "歷史訂單"}
+                <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{selectedCustomer.name}</div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                  {selectedCustomer.isMember ? "會員" : selectedCustomer.id?.startsWith("temp:") ? "臨時客人" : "歷史訂單"}
                   {selectedCustomer.communityName && ` · ${selectedCustomer.communityName}`}
-                  {selectedCustomer.phone && ` · ${selectedCustomer.phone}`}
                 </div>
               </div>
-              <button onClick={() => setCustomerId("")} style={{ background: "none", border: "none", color: C.accent, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>更換</button>
+              <button onClick={() => setCustomerId("")} style={{ background: "none", border: "none", color: C.accent, fontSize: 11, cursor: "pointer", fontWeight: 600 }}>更換</button>
+            </div>
+          ) : (
+            // 沒選客人 → 展開客人選擇區
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, letterSpacing: 1, fontWeight: 600 }}>選擇客人 *</div>
+
+              {!showNewCustomer ? (
+                <>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="搜尋姓名 / 社群 / 電話"
+                      style={{ flex: 1, background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", color: C.text }}/>
+                    <button onClick={() => setShowNewCustomer(true)}
+                      style={{ background: C.accent, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                      <Icon name="plus" size={14} /> 新增
+                    </button>
+                  </div>
+                  <div style={{ maxHeight: 240, overflowY: "auto", border: `0.5px solid ${C.border}`, borderRadius: 10, background: C.bgCard }}>
+                    {filteredCustomers.length === 0 && (
+                      <div style={{ padding: "24px 14px", textAlign: "center", fontSize: 12, color: C.muted }}>
+                        {searchTerm ? `找不到「${searchTerm}」` : "尚無客人,請按「+ 新增」"}
+                      </div>
+                    )}
+                    {filteredCustomers.map(c => (
+                      <button key={c.id} onClick={() => { setCustomerId(c.id); setSearchTerm(""); }}
+                        className="row-hover"
+                        style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: "none", border: "none", borderBottom: `0.5px solid ${C.border}`, cursor: "pointer", textAlign: "left", color: C.text }}>
+                        <div style={{ width: 30, height: 30, borderRadius: "50%", background: C.bgDeep, color: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600 }}>
+                          {c.name.charAt(0)}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{c.name}</div>
+                          <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                            {c.isMember ? "會員" : "歷史訂單"}
+                            {c.communityName && ` · ${c.communityName}`}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: 12 }}>
+                  <div style={{ fontSize: 12, color: C.text, fontWeight: 500, marginBottom: 8 }}>新增臨時客人</div>
+                  <input value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)}
+                    placeholder="客人姓名(例如:張小姐)" autoFocus
+                    onKeyDown={e => e.key === "Enter" && useNewCustomer()}
+                    style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", color: C.text, marginBottom: 8 }}/>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={useNewCustomer}
+                      style={{ flex: 1, background: C.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                      使用此客人
+                    </button>
+                    <button onClick={() => { setShowNewCustomer(false); setNewCustomerName(""); }}
+                      style={{ background: "none", color: C.muted, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, cursor: "pointer" }}>
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* 沒選 / 點更換 → 顯示搜尋 + 列表 */}
-          {(!selectedCustomer || customerId === "") && !showNewCustomer && (
-            <>
-              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                  placeholder="🔍 搜尋客人姓名 / 社群 / 電話"
-                  style={{ flex: 1, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", fontSize: 13, color: C.text }}/>
-                <button onClick={() => setShowNewCustomer(true)}
-                  style={{ background: C.accent, color: "#fff", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                  + 新增
+          {/* 商品品項區 */}
+          {selectedCustomer && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, fontWeight: 600 }}>商品 · {items.length} 項</div>
+                <button onClick={addItem} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: C.accent, background: C.accentBg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontWeight: 500 }}>
+                  <Icon name="plus" size={12} /> 加品項
                 </button>
               </div>
-              <div style={{ maxHeight: 200, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 10, background: C.bg }}>
-                {filteredCustomers.length === 0 && (
-                  <div style={{ padding: "20px 14px", textAlign: "center", fontSize: 12, color: C.muted }}>
-                    {searchTerm ? `找不到「${searchTerm}」` : "尚無客人資料,請按「+ 新增」"}
-                  </div>
-                )}
-                {filteredCustomers.map(c => (
-                  <button key={c.id} onClick={() => { setCustomerId(c.id); setSearchTerm(""); }}
-                    className="row-hover"
-                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", background: "none", border: "none", borderBottom: `1px solid ${C.border}`, cursor: "pointer", textAlign: "left", color: C.text }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.bgDeep, color: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600 }}>
-                      {c.name.charAt(0)}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{c.name}</div>
-                      <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
-                        {c.isMember ? "會員" : "歷史訂單"}
-                        {c.communityName && ` · ${c.communityName}`}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {items.map((it, idx) => (
+                  <div key={it.id} style={{ background: C.bgCard, borderRadius: 12, padding: 12, border: `0.5px solid ${C.border}`, position: "relative" }}>
+                    {items.length > 1 && (
+                      <button onClick={() => removeItem(it.id)}
+                        style={{ position: "absolute", top: 8, right: 8, background: C.bgDeep, border: "none", color: C.muted, width: 24, height: 24, borderRadius: "50%", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Icon name="x" size={12} />
+                      </button>
+                    )}
+                    <div style={{ display: "flex", gap: 10 }}>
+                      {/* 圖片上傳 */}
+                      <label style={{ width: 64, height: 64, flexShrink: 0, background: C.bgDeep, border: `1px dashed ${C.borderDeep}`, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", position: "relative" }}>
+                        {it.image ? (
+                          <>
+                            <img src={it.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            <button onClick={e => { e.preventDefault(); updateItem(it.id, "image", ""); }}
+                              style={{ position: "absolute", top: 2, right: 2, width: 18, height: 18, background: "rgba(0,0,0,.55)", color: "#fff", border: "none", borderRadius: "50%", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <Icon name="x" size={10} />
+                            </button>
+                          </>
+                        ) : (
+                          <div style={{ textAlign: "center", color: C.muted }}>
+                            <Icon name="camera" size={18} />
+                            <div style={{ fontSize: 9, marginTop: 2 }}>圖片</div>
+                          </div>
+                        )}
+                        <input type="file" accept="image/*" onChange={e => handleImagePick(it.id, e.target.files?.[0])} style={{ display: "none" }} />
+                      </label>
+
+                      {/* 右側欄位 */}
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                        <input value={it.name} onChange={e => updateItem(it.id, "name", e.target.value)}
+                          placeholder={`品項 ${idx + 1} 名稱 *`}
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "7px 10px", color: C.text, fontWeight: 500, paddingRight: 28 }} />
+                        <input value={it.variant} onChange={e => updateItem(it.id, "variant", e.target.value)}
+                          placeholder="規格 / 款式(例如:草莓 50ml)"
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", color: C.text, fontSize: 12 }} />
                       </div>
                     </div>
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>共 {allCustomers.length} 位客人</div>
-            </>
-          )}
 
-          {/* 新增臨時客人表單 */}
-          {showNewCustomer && (
-            <div style={{ background: C.bgDeep, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: 12 }}>
-              <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>新增臨時客人</div>
-              <input value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)}
-                placeholder="客人姓名 (例如:張小姐)" autoFocus
-                onKeyDown={e => e.key === "Enter" && useNewCustomer()}
-                style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", fontSize: 14, color: C.text, marginBottom: 8 }}/>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={useNewCustomer}
-                  style={{ flex: 1, background: C.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                  使用此客人
-                </button>
-                <button onClick={() => { setShowNewCustomer(false); setNewCustomerName(""); }}
-                  style={{ background: "none", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer" }}>
-                  取消
-                </button>
-              </div>
-              <div style={{ fontSize: 10, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
-                💡 臨時客人不會建立會員,只用於這筆訂單
+                    {/* 第二行:售價 / 成本 / 數量 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 70px", gap: 6, marginTop: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: C.muted, marginBottom: 2, fontWeight: 600 }}>售價 NT$ *</div>
+                        <input type="number" inputMode="numeric" value={it.price} onChange={e => updateItem(it.id, "price", e.target.value)} placeholder="0"
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: C.muted, marginBottom: 2, fontWeight: 600 }}>成本 NT$</div>
+                        <input type="number" inputMode="numeric" value={it.cost} onChange={e => updateItem(it.id, "cost", e.target.value)} placeholder="0"
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: C.muted, marginBottom: 2, fontWeight: 600 }}>數量</div>
+                        <input type="number" inputMode="numeric" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} placeholder="1"
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text, textAlign: "center" }} />
+                      </div>
+                    </div>
+
+                    {it.price && Number(it.price) > 0 && (
+                      <div style={{ fontSize: 10, color: it.cost && Number(it.cost) > 0 ? C.green : C.muted, marginTop: 6, textAlign: "right" }}>
+                        {it.cost && Number(it.cost) > 0
+                          ? `小計 NT$${(Number(it.price) * Number(it.qty || 1)).toLocaleString()} · 利潤 NT$${((Number(it.price) - Number(it.cost)) * Number(it.qty || 1)).toLocaleString()}`
+                          : `小計 NT$${(Number(it.price) * Number(it.qty || 1)).toLocaleString()}`}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
 
-        {/* 品項清單 */}
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>商品品項</label>
-            <button onClick={addItem} style={{ fontSize: 12, color: C.accent, background: C.accentBg, border: `1px solid ${C.accent}40`, borderRadius: 8, padding: "4px 12px", cursor: "pointer" }}>+ 新增品項</button>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {items.map((it, idx) => (
-              <div key={it.id} style={{ background: C.bgDeep, borderRadius: 12, padding: "14px 14px 10px", border: `1px solid ${C.border}`, position: "relative" }}>
-                {items.length > 1 && (
-                  <button onClick={() => removeItem(it.id)}
-                    style={{ position: "absolute", top: 10, right: 12, background: "none", border: "none", color: C.faint, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
-                )}
-                <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 10 }}>品項 {idx + 1}</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <Input label="商品名稱 *" value={it.name} onChange={v => updateItem(it.id, "name", v)} placeholder="資生堂防曬乳 SPF50" />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <Input label="規格" value={it.spec} onChange={v => updateItem(it.id, "spec", v)} placeholder="50ml / 白色 / L號" />
-                    <Input label="款式" value={it.variant} onChange={v => updateItem(it.id, "variant", v)} placeholder="草莓款 / 限定版" />
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    <Input label="售價 NT$ *" type="number" value={it.price} onChange={v => updateItem(it.id, "price", v)} placeholder="728" />
-                    <Input label="成本 NT$" type="number" value={it.cost} onChange={v => updateItem(it.id, "cost", v)} placeholder="560" />
-                    <Input label="數量" type="number" value={it.qty} onChange={v => updateItem(it.id, "qty", v)} placeholder="1" />
-                  </div>
-                  {it.price && it.cost && Number(it.price) > 0 && (
-                    <div style={{ fontSize: 11, color: C.green }}>
-                      利潤：NT$ {((Number(it.price) - Number(it.cost)) * Number(it.qty || 1)).toLocaleString()}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+        {/* Footer (固定) */}
+        <div style={{ padding: "10px 16px 14px", borderTop: `0.5px solid ${C.border}`, background: C.bgCard, flexShrink: 0, paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: C.muted }}>{itemCount} 項商品</div>
+              <div style={{ fontSize: 19, fontWeight: 500, color: C.text }}>NT${totalAmount.toLocaleString()}</div>
+            </div>
+            <Btn onClick={save} icon="check" disabled={!selectedCustomer || itemCount === 0}>建立訂單</Btn>
           </div>
         </div>
 
-        {/* 合計 */}
-        {items.some(it => it.price) && (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: C.accentBg, borderRadius: 10, border: `1px solid ${C.accent}30` }}>
-            <span style={{ fontSize: 13, color: C.muted }}>合計（{items.filter(it => it.name).length} 項）</span>
-            <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>
-              NT$ {items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0).toLocaleString()}
-            </span>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 4 }}>
-          <Btn variant="ghost" onClick={onClose}>取消</Btn>
-          <Btn onClick={save}>建立訂單</Btn>
-        </div>
       </div>
-    </Modal>
+    </div>
   );
 }
 
