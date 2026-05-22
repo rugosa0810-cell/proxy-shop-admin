@@ -494,6 +494,16 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       supabase.from("wishlist").select("*").order("created_at", { ascending: false }),
       supabase.from("members").select("*"),
     ]).then(([o, p, s, a, w, m]) => {
+      // 個別檢查每個表是否有錯
+      if (o.error) console.error("orders 載入失敗:", o.error);
+      if (p.error) console.error("products 載入失敗:", p.error);
+      if (s.error) console.error("in_stock 載入失敗:", s.error);
+      if (a.error) console.error("announcements 載入失敗:", a.error);
+      if (w.error) console.error("wishlist 載入失敗:", w.error);
+      if (m.error) {
+        console.error("members 載入失敗:", m.error);
+        showToast(`⚠️ 客人資料載入失敗:${m.error.message || "權限不足"}`);
+      }
       setData(d => ({
         ...d,
         orders:        o.data || [],
@@ -503,6 +513,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         wishlist:      w.data || [],
         members:       m.data || [],
       }));
+      console.log(`📊 已載入: 訂單 ${(o.data||[]).length}, 商品 ${(p.data||[]).length}, 會員 ${(m.data||[]).length}, 許願 ${(w.data||[]).length}`);
     }).catch(err => console.error("Supabase 載入失敗", err));
 
     // 即時訂閱新訂單
@@ -1051,6 +1062,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
     communityName: m.community_name || "",
     phone: m.phone || "",
     isMember: true,
+    source: "會員",
   }));
 
   // 2. 從訂單聚合「曾下過單但不在 members 表的客人」
@@ -1064,10 +1076,24 @@ function AddOrderModal({ data, setData, onClose, toast }) {
       const fallbackKey = key || `name:${cname}`;
       if (!seen.has(fallbackKey)) {
         seen.add(fallbackKey);
-        orderCustomers.push({ id: fallbackKey, name: cname, communityName: "", phone: "", isMember: false });
+        orderCustomers.push({ id: fallbackKey, name: cname, communityName: "", phone: "", isMember: false, source: "歷史訂單" });
       }
     }
   });
+
+  // 3. 從許願清單聚合「許過願但還沒下單也不在 members 表的客人」
+  (data.wishlist || []).forEach(w => {
+    const key = w.customer_line_id || w.line_user_id || w.customerId;
+    const cname = w.customer_name || w.customerName;
+    if (cname) {
+      const fallbackKey = key || `name:${cname}`;
+      if (!seen.has(fallbackKey)) {
+        seen.add(fallbackKey);
+        orderCustomers.push({ id: fallbackKey, name: cname, communityName: "", phone: "", isMember: false, source: "許願清單" });
+      }
+    }
+  });
+
   const allCustomers = [...memberList, ...orderCustomers];
 
   const [customerId, setCustomerId] = useState(allCustomers[0]?.id || "");
@@ -1214,7 +1240,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
-                  {selectedCustomer.isMember ? "會員" : selectedCustomer.id?.startsWith("temp:") ? "臨時客人" : "歷史訂單"}
+                  {selectedCustomer.source || (selectedCustomer.isMember ? "會員" : selectedCustomer.id?.startsWith("temp:") ? "臨時客人" : "歷史訂單")}
                   {selectedCustomer.phone && ` · ${selectedCustomer.phone}`}
                 </div>
               </div>
@@ -1257,7 +1283,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                             )}
                           </div>
                           <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
-                            {c.isMember ? "會員" : "歷史訂單"}
+                            {c.source || (c.isMember ? "會員" : "歷史訂單")}
                           </div>
                         </div>
                       </button>
