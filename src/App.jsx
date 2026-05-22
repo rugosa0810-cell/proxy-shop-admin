@@ -133,7 +133,7 @@ const injectStyles = () => {
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:${C.bg};color:${C.text};font-family:'Noto Sans TC',sans-serif;min-height:100vh;-webkit-text-size-adjust:100%}
     ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-thumb{background:${C.faint};border-radius:99px}
-    input,select,textarea,button{font-family:inherit;outline:none;font-size:14px}
+    input,select,textarea,button{font-family:inherit;outline:none;font-size:14px;box-sizing:border-box;max-width:100%}
     /* 手機上 iOS 自動放大避免:input 字至少 16px */
     @media (max-width:640px) {
       input,select,textarea{font-size:16px!important}
@@ -1181,8 +1181,8 @@ function AddOrderModal({ data, setData, onClose, toast }) {
   const itemCount = items.filter(it => it.name.trim()).length;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(58,46,36,.45)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }} onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="fade" style={{ background: C.bg, width: "100%", maxWidth: 540, height: "100dvh", maxHeight: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(58,46,36,.45)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000, overflow: "hidden" }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="fade" style={{ background: C.bg, width: "100%", maxWidth: 540, height: "100dvh", maxHeight: "100dvh", display: "flex", flexDirection: "column", overflowX: "hidden", overflowY: "hidden" }}>
 
         {/* Header (固定) */}
         <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", gap: 10, borderBottom: `0.5px solid ${C.border}`, background: C.bgCard, flexShrink: 0 }}>
@@ -1198,7 +1198,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
         </div>
 
         {/* Body (滾動) */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "14px 16px", minWidth: 0 }}>
 
           {/* 客人區塊(摺疊版) */}
           {selectedCustomer && !showNewCustomer ? (
@@ -1207,10 +1207,15 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                 {selectedCustomer.name.charAt(0)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{selectedCustomer.name}</div>
+                <div style={{ fontSize: 13, color: C.text, fontWeight: 500, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                  <span>{selectedCustomer.name}</span>
+                  {selectedCustomer.communityName && (
+                    <span style={{ fontSize: 11, color: C.accent, fontWeight: 500 }}>@{selectedCustomer.communityName}</span>
+                  )}
+                </div>
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
                   {selectedCustomer.isMember ? "會員" : selectedCustomer.id?.startsWith("temp:") ? "臨時客人" : "歷史訂單"}
-                  {selectedCustomer.communityName && ` · ${selectedCustomer.communityName}`}
+                  {selectedCustomer.phone && ` · ${selectedCustomer.phone}`}
                 </div>
               </div>
               <button onClick={() => setCustomerId("")} style={{ background: "none", border: "none", color: C.accent, fontSize: 11, cursor: "pointer", fontWeight: 600 }}>更換</button>
@@ -1245,10 +1250,14 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                           {c.name.charAt(0)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{c.name}</div>
+                          <div style={{ fontSize: 13, color: C.text, fontWeight: 500, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                            <span>{c.name}</span>
+                            {c.communityName && (
+                              <span style={{ fontSize: 11, color: C.accent, fontWeight: 500 }}>@{c.communityName}</span>
+                            )}
+                          </div>
                           <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
                             {c.isMember ? "會員" : "歷史訂單"}
-                            {c.communityName && ` · ${c.communityName}`}
                           </div>
                         </div>
                       </button>
@@ -1296,7 +1305,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                         <Icon name="x" size={12} />
                       </button>
                     )}
-                    <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
                       {/* 圖片上傳 */}
                       <label style={{ width: 64, height: 64, flexShrink: 0, background: C.bgDeep, border: `1px dashed ${C.borderDeep}`, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", position: "relative" }}>
                         {it.image ? (
@@ -1320,29 +1329,29 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
                         <input value={it.name} onChange={e => updateItem(it.id, "name", e.target.value)}
                           placeholder={`品項 ${idx + 1} 名稱 *`}
-                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "7px 10px", color: C.text, fontWeight: 500, paddingRight: 28 }} />
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "7px 10px", color: C.text, fontWeight: 500, boxSizing: "border-box", minWidth: 0 }} />
                         <input value={it.variant} onChange={e => updateItem(it.id, "variant", e.target.value)}
                           placeholder="規格 / 款式(例如:草莓 50ml)"
-                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", color: C.text, fontSize: 12 }} />
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", color: C.text, fontSize: 12, boxSizing: "border-box", minWidth: 0 }} />
                       </div>
                     </div>
 
                     {/* 第二行:售價 / 成本 / 數量 */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 70px", gap: 6, marginTop: 8 }}>
-                      <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 8, minWidth: 0 }}>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 9, color: C.muted, marginBottom: 2, fontWeight: 600 }}>售價 NT$ *</div>
                         <input type="number" inputMode="numeric" value={it.price} onChange={e => updateItem(it.id, "price", e.target.value)} placeholder="0"
-                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text }} />
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text, boxSizing: "border-box", minWidth: 0 }} />
                       </div>
-                      <div>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 9, color: C.muted, marginBottom: 2, fontWeight: 600 }}>成本 NT$</div>
                         <input type="number" inputMode="numeric" value={it.cost} onChange={e => updateItem(it.id, "cost", e.target.value)} placeholder="0"
-                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text }} />
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text, boxSizing: "border-box", minWidth: 0 }} />
                       </div>
-                      <div>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 9, color: C.muted, marginBottom: 2, fontWeight: 600 }}>數量</div>
                         <input type="number" inputMode="numeric" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} placeholder="1"
-                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text, textAlign: "center" }} />
+                          style={{ width: "100%", background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 8px", color: C.text, textAlign: "center", boxSizing: "border-box", minWidth: 0 }} />
                       </div>
                     </div>
 
