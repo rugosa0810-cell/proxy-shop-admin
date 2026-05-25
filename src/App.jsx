@@ -1513,37 +1513,69 @@ function CatalogPage({ data, setData, toast }) {
         <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-        {data.products.map(p => (
-          <div key={p.id} style={{ background:C.surface, border:`1.5px solid ${C.border}`, overflow:"hidden", boxShadow:C.shadow }}>
-            <div style={{ background:C.bgDeep, padding:"16px 16px 12px", textAlign:"center", position:"relative", minHeight:90, display:"flex", alignItems:"center", justifyContent:"center" }}>
-              {p.status==="on" && <span className="pill" style={{ position:"absolute", top:8, left:8, background:C.greenBg, color:C.green, fontSize:11 }}>販售中</span>}
-              {p.status==="off"&& <span className="pill" style={{ position:"absolute", top:8, left:8, background:C.redBg,  color:C.red,   fontSize:11 }}>已下架</span>}
-              {p.image && p.image.startsWith("data:") ? (
-                <img src={p.image} alt={p.name} style={{ width:70, height:70, objectFit:"cover", borderRadius:10 }} />
-              ) : (
-                <div style={{ fontSize:32 }}>{p.image || "🛒"}</div>
-              )}
-            </div>
-            <div style={{ padding:"10px 12px" }}>
-              <div style={{ fontWeight:700, fontSize:14, marginBottom:2 }}>{p.name}</div>
-              <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>{p.category}</div>
-              {/* Variants preview */}
-              {p.variants && p.variants.length > 0 && (
-                <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
-                  {p.variants.map(v => (
-                    <span key={v.id} style={{ fontSize:10, color:C.muted, border:`1px solid ${C.border}`, padding:"1px 7px", letterSpacing:.3 }}>{v.name}</span>
-                  ))}
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {data.products.length === 0 && (
+          <div style={{ padding:"40px 20px", textAlign:"center", color:C.muted, background:C.bgCard, borderRadius:14, border:`0.5px solid ${C.border}` }}>
+            尚無商品,點右上「+ 新增商品」開始
+          </div>
+        )}
+        {data.products.map(p => {
+          // 計算售價範圍
+          const prices = (p.variants || []).map(v => Number(v.price) || 0).filter(x => x > 0);
+          const minP = prices.length ? Math.min(...prices) : 0;
+          const maxP = prices.length ? Math.max(...prices) : 0;
+          return (
+            <div key={p.id} style={{ background:C.bgCard, border:`0.5px solid ${C.border}`, borderRadius:14, overflow:"hidden", boxShadow:C.shadow }}>
+              <div style={{ display:"flex", gap:12, padding:"12px 14px" }}>
+                {/* 左側商品圖 */}
+                <div style={{ width:72, height:72, flexShrink:0, background:C.bgDeep, borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", position:"relative", overflow:"hidden" }}>
+                  {p.image && p.image.startsWith("data:") ? (
+                    <img src={p.image} alt={p.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                  ) : (
+                    <Icon name="photo" size={28} color={C.faint} />
+                  )}
                 </div>
-              )}
-              <div style={{ display:"flex", gap:6, marginTop:8 }}>
-                <Btn sm variant="soft" onClick={() => setEditing(p)}>✏️ 編輯</Btn>
-                <Btn sm variant="ghost" onClick={() => toggle(p.id)}>{p.status==="on"?"下架":"上架"}</Btn>
-                <button onClick={() => del(p.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.red }}>🗑</button>
+                {/* 右側資訊 */}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:6 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:9, color:C.faint, letterSpacing:.5, marginBottom:2 }}>{p.category || "未分類"}</div>
+                      <div style={{ fontSize:14, fontWeight:500, color:C.text, lineHeight:1.3, wordBreak:"break-word" }}>{p.name}</div>
+                    </div>
+                    <span className="pill" style={{ background: p.status==="on"?C.greenBg:C.redBg, color: p.status==="on"?C.greenDark:C.red, flexShrink:0 }}>
+                      <Icon name={p.status==="on"?"check":"x"} size={10} />
+                      {p.status==="on"?"販售中":"已下架"}
+                    </span>
+                  </div>
+                  {/* 售價 */}
+                  {minP > 0 && (
+                    <div style={{ fontSize:13, color:C.accentDark, fontWeight:500, marginTop:4 }}>
+                      {minP === maxP ? `NT$${minP}` : `$${minP} - $${maxP}`}
+                    </div>
+                  )}
+                  {/* 款式 */}
+                  {p.variants && p.variants.length > 0 && (
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
+                      {p.variants.slice(0,4).map(v => (
+                        <span key={v.id} style={{ fontSize:10, color:C.textMid, background:C.bgDeep, padding:"2px 8px", borderRadius:99 }}>{v.name}</span>
+                      ))}
+                      {p.variants.length > 4 && <span style={{ fontSize:10, color:C.muted, padding:"2px 4px" }}>+{p.variants.length-4}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* 底部操作列 */}
+              <div style={{ display:"flex", gap:6, padding:"8px 14px 12px", borderTop:`0.5px dashed ${C.border}` }}>
+                <Btn sm variant="soft" icon="edit" onClick={() => setEditing(p)} style={{ flex:1 }}>編輯</Btn>
+                <Btn sm variant="ghost" icon={p.status==="on"?"eye-off":"eye"} onClick={() => toggle(p.id)} style={{ flex:1 }}>{p.status==="on"?"下架":"上架"}</Btn>
+                <button onClick={() => del(p.id)}
+                  style={{ background:"none", border:`0.5px solid ${C.border}`, borderRadius:10, padding:"7px 12px", cursor:"pointer", color:C.red, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <Icon name="trash" size={14} />
+                </button>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {showAdd && <ProductModal onSave={saveNew} onClose={() => setShowAdd(false)} rate={data.rate} />}
@@ -1568,6 +1600,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [vName, setVName]       = useState("");
   const [vPrice, setVPrice]     = useState("");
   const [vCostJpy, setVCostJpy] = useState("");
+  const [vCostTwd, setVCostTwd] = useState("");
+  const [costMode, setCostMode] = useState("twd"); // "twd"=直填台幣, "jpy"=日幣×匯率自動算
   const [uploading, setUploading] = useState(false);
 
   // 本商品匯率(留空時用 0)
@@ -1589,10 +1623,17 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
 
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
-    const jpy = Number(vCostJpy) || 0;
-    const cost = Math.round(jpy * effectiveRate);
+    let jpy = 0, cost = 0;
+    if (costMode === "jpy") {
+      jpy = Number(vCostJpy) || 0;
+      cost = Math.round(jpy * effectiveRate);
+    } else {
+      // 直填台幣
+      cost = Number(vCostTwd) || 0;
+      jpy = effectiveRate > 0 ? Math.round(cost / effectiveRate) : 0;
+    }
     setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, costJpy:jpy, cost }]);
-    setVName(""); setVPrice(""); setVCostJpy("");
+    setVName(""); setVPrice(""); setVCostJpy(""); setVCostTwd("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -1683,49 +1724,98 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
         <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
           <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:6 }}>款式設定</div>
           <div style={{ fontSize:12, color:C.muted, marginBottom:8, lineHeight:1.7 }}>
-            例如：顏色（紅色、藍色）、尺寸（S / M / L）<br/>客人下單時可從中選擇
+            例如:顏色(紅色、藍色)、尺寸(S / M / L)<br/>客人下單時可從中選擇
           </div>
           <div style={{ fontSize:11, color:C.muted, marginBottom:12, padding:"6px 10px", background:C.accentBg, borderRadius:6, border:`1px solid ${C.border}` }}>
-            💱 成本預設＝日幣 × 匯率（目前 ¥1 = NT${effectiveRate || "?"}），也可直接修改下方成本欄位
+            💱 成本預設=日幣 × 匯率(目前 ¥1 = NT${effectiveRate || "?"}),也可直接修改下方成本欄位
           </div>
           {variants.length > 0 && (
-            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:12 }}>
               {variants.map(v => (
-                <div key={v.id} style={{ display:"flex", alignItems:"flex-end", gap:8, padding:"10px 12px", background:C.bgDeep, borderRadius:8, border:`1px solid ${C.border}` }}>
-                  <div style={{ flex:1.4, fontSize:13, fontWeight:600, paddingBottom:6 }}>{v.name}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>售價 NT$</div>
-                    <input type="number" value={v.price||0}
-                      onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, price:Number(e.target.value)||0} : x))}
-                      style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12 }}/>
+                <div key={v.id} style={{ padding:"12px 14px", background:C.bgDeep, borderRadius:10, border:`1px solid ${C.border}`, position:"relative" }}>
+                  {/* 款式名稱 + 刪除按鈕 */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                    <div style={{ fontSize:14, fontWeight:600, color:C.text }}>{v.name}</div>
+                    <button onClick={() => removeVariant(v.id)}
+                      style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:18, lineHeight:1, padding:"0 4px" }}>×</button>
                   </div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>日幣價格 ¥</div>
-                    <input type="number" value={v.costJpy||0}
-                      onChange={e => {
-                        const newJpy = Number(e.target.value) || 0;
-                        setVariants(vs => vs.map(x => x.id===v.id
-                          ? { ...x, costJpy: newJpy, cost: Math.round(newJpy * effectiveRate) }
-                          : x));
-                      }}
-                      style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12 }}/>
+                  {/* 上下堆疊:售價 → 匯率 → 日幣 → 成本 */}
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    <div>
+                      <div style={{ fontSize:10, color:C.muted, marginBottom:3, fontWeight:500 }}>售價 NT$</div>
+                      <input type="number" inputMode="numeric" value={v.price||0}
+                        onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, price:Number(e.target.value)||0} : x))}
+                        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, boxSizing:"border-box", minWidth:0 }}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:10, color:C.muted, marginBottom:3, fontWeight:500 }}>💱 匯率 ¥1 = NT$</div>
+                      <input type="number" step="0.001" inputMode="decimal" value={v.rate != null ? v.rate : effectiveRate}
+                        onChange={e => {
+                          const newRate = Number(e.target.value) || 0;
+                          setVariants(vs => vs.map(x => x.id===v.id
+                            ? { ...x, rate: newRate, cost: Math.round((Number(x.costJpy)||0) * newRate) }
+                            : x));
+                        }}
+                        placeholder="0.21"
+                        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, boxSizing:"border-box", minWidth:0 }}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:10, color:C.muted, marginBottom:3, fontWeight:500 }}>日幣價格 ¥</div>
+                      <input type="number" inputMode="numeric" value={v.costJpy||0}
+                        onChange={e => {
+                          const newJpy = Number(e.target.value) || 0;
+                          const useRate = v.rate != null ? v.rate : effectiveRate;
+                          setVariants(vs => vs.map(x => x.id===v.id
+                            ? { ...x, costJpy: newJpy, cost: Math.round(newJpy * useRate) }
+                            : x));
+                        }}
+                        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, boxSizing:"border-box", minWidth:0 }}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:10, color:C.muted, marginBottom:3, fontWeight:500 }}>成本 NT$ <span style={{ color:C.faint }}>(可手動覆寫)</span></div>
+                      <input type="number" inputMode="numeric" value={v.cost||0}
+                        onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, cost:Number(e.target.value)||0} : x))}
+                        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, color:C.red, fontWeight:600, boxSizing:"border-box", minWidth:0 }}/>
+                    </div>
                   </div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:10, color:C.muted, marginBottom:2 }}>成本 NT$</div>
-                    <input type="number" value={v.cost||0}
-                      onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, cost:Number(e.target.value)||0} : x))}
-                      style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 6px", fontSize:12, color:C.red, fontWeight:600 }}/>
-                  </div>
-                  <button onClick={() => removeVariant(v.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:16, flexShrink:0, paddingBottom:6 }}>×</button>
                 </div>
               ))}
             </div>
           )}
-          <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
-            <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ flex:2 }} />
-            <Input label="售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ flex:1 }} />
-            <Input label="日幣 ¥" type="number" value={vCostJpy} onChange={setVCostJpy} placeholder="0" style={{ flex:1 }} />
-            <Btn sm variant="soft" onClick={addVariant} style={{ marginBottom:1 }}>+ 新增</Btn>
+          {/* 新增款式表單 */}
+          <div style={{ padding:"12px 14px", background:C.accentBg, borderRadius:10, border:`1px dashed ${C.accent}50` }}>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontWeight:600 }}>+ 新增款式</div>
+            <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ marginBottom:8 }} />
+            <Input label="售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ marginBottom:8 }} />
+
+            {/* 成本模式切換 */}
+            <div style={{ marginBottom:8 }}>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontWeight:600 }}>成本填寫方式</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={() => setCostMode("twd")} type="button"
+                  style={{ padding:"7px 8px", border:`1.5px solid ${costMode==="twd"?C.accent:C.border}`, background: costMode==="twd"?C.accent:"transparent", color: costMode==="twd"?"#fff":C.textMid, borderRadius:8, fontSize:12, fontWeight:500, cursor:"pointer" }}>
+                  直接填台幣
+                </button>
+                <button onClick={() => setCostMode("jpy")} type="button"
+                  style={{ padding:"7px 8px", border:`1.5px solid ${costMode==="jpy"?C.accent:C.border}`, background: costMode==="jpy"?C.accent:"transparent", color: costMode==="jpy"?"#fff":C.textMid, borderRadius:8, fontSize:12, fontWeight:500, cursor:"pointer" }}>
+                  日幣 × 匯率
+                </button>
+              </div>
+            </div>
+
+            {/* 依模式顯示對應欄位 */}
+            {costMode === "twd" ? (
+              <Input label="成本 NT$" type="number" value={vCostTwd} onChange={setVCostTwd} placeholder="0" style={{ marginBottom:10 }} />
+            ) : (
+              <>
+                <Input label="日幣價格 ¥" type="number" value={vCostJpy} onChange={setVCostJpy} placeholder="0" style={{ marginBottom:6 }} />
+                <div style={{ fontSize:11, color:C.muted, marginBottom:10, padding:"4px 10px" }}>
+                  自動換算: ¥{vCostJpy||0} × {effectiveRate||0} = <span style={{ color:C.red, fontWeight:600 }}>NT${Math.round((Number(vCostJpy)||0) * effectiveRate)}</span>
+                </div>
+              </>
+            )}
+
+            <Btn sm onClick={addVariant} style={{ width:"100%" }}>新增此款式</Btn>
           </div>
         </div>
 
