@@ -539,6 +539,52 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "orders" }, payload => {
         setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== payload.old.id) }));
       })
+      // ── 商品 products 即時同步 ─────────
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "products" }, payload => {
+        setData(d => d.products.find(p => p.id === payload.new.id)
+          ? d
+          : ({ ...d, products: [payload.new, ...d.products] }));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "products" }, payload => {
+        setData(d => ({ ...d, products: d.products.map(p => p.id === payload.new.id ? payload.new : p) }));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "products" }, payload => {
+        setData(d => ({ ...d, products: d.products.filter(p => p.id !== payload.old.id) }));
+      })
+      // ── 現貨 in_stock 即時同步 ─────────
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "in_stock" }, payload => {
+        setData(d => d.inStock.find(p => p.id === payload.new.id)
+          ? d
+          : ({ ...d, inStock: [payload.new, ...d.inStock] }));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "in_stock" }, payload => {
+        setData(d => ({ ...d, inStock: d.inStock.map(p => p.id === payload.new.id ? payload.new : p) }));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "in_stock" }, payload => {
+        setData(d => ({ ...d, inStock: d.inStock.filter(p => p.id !== payload.old.id) }));
+      })
+      // ── 會員 members 即時同步 ─────────
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "members" }, payload => {
+        setData(d => d.members.find(m => m.line_user_id === payload.new.line_user_id)
+          ? d
+          : ({ ...d, members: [payload.new, ...d.members] }));
+        showToast(`新客人加入:${payload.new.line_name || payload.new.community_name || "未命名"}`);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "members" }, payload => {
+        setData(d => ({ ...d, members: d.members.map(m => m.line_user_id === payload.new.line_user_id ? payload.new : m) }));
+      })
+      // ── 公告 announcements 即時同步 ────
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "announcements" }, payload => {
+        setData(d => d.announcements.find(a => a.id === payload.new.id)
+          ? d
+          : ({ ...d, announcements: [payload.new, ...d.announcements] }));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "announcements" }, payload => {
+        setData(d => ({ ...d, announcements: d.announcements.map(a => a.id === payload.new.id ? payload.new : a) }));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "announcements" }, payload => {
+        setData(d => ({ ...d, announcements: d.announcements.filter(a => a.id !== payload.old.id) }));
+      })
       .subscribe();
 
     return () => sub.unsubscribe();
@@ -1037,7 +1083,7 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
               <span style={{ color:C.green, fontWeight:700 }}>利潤 {fmtMoney(o.profit||0)}</span>
             </div>
             <div style={{ display:"flex", gap:6 }}>
-              {o.status==="arrived"&&(
+              {o.status==="shipped"&&(
                 <button onClick={async()=>{
                   if(!window.confirm(`確定封存訂單 #${o.no}？`))return;
                   const now=new Date().toISOString();
