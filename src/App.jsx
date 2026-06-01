@@ -869,14 +869,22 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
           <Btn sm variant="ghost" style={{ marginTop: 12 }} onClick={() => changeFilter("all")}>顯示全部</Btn>
         </div>
       )}
-      {filtered.map(o => <OrderCard key={o.id} o={o} updateStatus={updateStatus} del={del} setData={setData} toast={toast} />)}
+      {filtered.map(o => <OrderCard key={o.id} o={o} updateStatus={updateStatus} del={del} setData={setData} toast={toast} members={data.members||[]} />)}
       {showAdd && <AddOrderModal data={data} setData={setData} onClose={() => setShowAdd(false)} toast={toast} />}
     </div>
   );
 }
 
 // ─── 訂單卡片元件 ────────────────────────────────────────────────
-function OrderCard({ o, updateStatus, del, setData, toast }) {
+function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
+  // 找出這位客人的會員資料 (用 line_user_id 或 customer_line_id 比對)
+  const memberInfo = members.find(m =>
+    (o.customer_line_id && m.line_user_id === o.customer_line_id) ||
+    (o.customerId && m.line_user_id === o.customerId)
+  );
+  // 主顯示 = 社群名,副 = LINE 名
+  const displayName = memberInfo?.community_name || o.customer_name || o.customerName || "未命名";
+  const displayLineName = memberInfo?.line_name || "";
   const [expanded, setExpanded] = useState(false);
 
   const cost = (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
@@ -907,8 +915,11 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
               <span style={{ fontSize:11, color:C.muted }}>·</span>
               <span style={{ fontSize:11, color:C.muted }}>{orderDate}</span>
             </div>
-            <div style={{ fontWeight:700, fontSize:14, color:C.text, marginBottom:4 }}>
-              {o.customer_name||o.customerName}
+            <div style={{ fontWeight:700, fontSize:14, color:C.text, marginBottom:4, display:"flex", alignItems:"baseline", gap:6, flexWrap:"wrap" }}>
+              <span>{displayName}</span>
+              {displayLineName && displayLineName !== displayName && (
+                <span style={{ fontSize:11, color:C.accent, fontWeight:500 }}>@{displayLineName}</span>
+              )}
             </div>
             <div style={{ fontSize:12, color:C.muted }}>
               {(o.items||[])[0]?.name}{(o.items||[]).length > 1 ? ` 等 ${(o.items||[]).length} 件` : ""}
@@ -936,7 +947,9 @@ function OrderCard({ o, updateStatus, del, setData, toast }) {
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {[
                 { label:"訂單編號", value:`#${o.no}` },
-                { label:"客人", value:o.customer_name||o.customerName||"" },
+                { label:"客人", value: displayLineName && displayLineName !== displayName
+                    ? <span>{displayName} <span style={{ color:C.accent, fontSize:11 }}>@{displayLineName}</span></span>
+                    : displayName },
                 { label:"訂單狀態", value:<StatusBadge status={o.status}/> },
                 { label:"付款狀態", value:<span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:ps.bg, color:ps.color, fontWeight:600 }}>{ps.label}</span> },
                 { label:"總金額", value:fmtMoney(total+shippingFee), bold:true },
