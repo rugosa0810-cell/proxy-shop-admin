@@ -1104,7 +1104,8 @@ function AddOrderModal({ data, setData, onClose, toast }) {
   // 1. 從 members 撈會員清單(每位會員的 line_user_id 是唯一 key)
   const memberList = (data.members || []).map(m => ({
     id: m.line_user_id || m.id,
-    name: m.line_name || m.community_name || m.recipient_name || "未命名",
+    name: m.community_name || m.line_name || m.recipient_name || "未命名",  // 主顯示 = 社群名
+    lineName: m.line_name || "",  // 副 = LINE 名
     communityName: m.community_name || "",
     phone: m.phone || "",
     isMember: true,
@@ -1179,6 +1180,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
     ? allCustomers.filter(c =>
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.communityName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.lineName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.phone.includes(searchTerm)
       )
     : allCustomers;
@@ -1281,8 +1283,8 @@ function AddOrderModal({ data, setData, onClose, toast }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, color: C.text, fontWeight: 500, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
                   <span>{selectedCustomer.name}</span>
-                  {selectedCustomer.communityName && (
-                    <span style={{ fontSize: 11, color: C.accent, fontWeight: 500 }}>@{selectedCustomer.communityName}</span>
+                  {selectedCustomer.lineName && selectedCustomer.lineName !== selectedCustomer.name && (
+                    <span style={{ fontSize: 11, color: C.accent, fontWeight: 500 }}>@{selectedCustomer.lineName}</span>
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
@@ -1324,8 +1326,8 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, color: C.text, fontWeight: 500, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
                             <span>{c.name}</span>
-                            {c.communityName && (
-                              <span style={{ fontSize: 11, color: C.accent, fontWeight: 500 }}>@{c.communityName}</span>
+                            {c.lineName && c.lineName !== c.name && (
+                              <span style={{ fontSize: 11, color: C.accent, fontWeight: 500 }}>@{c.lineName}</span>
                             )}
                           </div>
                           <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
