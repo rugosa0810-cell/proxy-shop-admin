@@ -973,9 +973,12 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
             </div>
           </div>
 
-          {/* 區塊二：商品明細 */}
+          {/* 區塊二:商品明細 */}
           <div style={{ padding:"14px" }}>
-            <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:10, letterSpacing:.5 }}>商品明細</div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:600, letterSpacing:.5 }}>商品明細</div>
+              <div style={{ fontSize:10, color:C.faint }}>長按或點 × 可刪除品項</div>
+            </div>
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {(o.items||[]).map((it,idx)=>(
                 <div key={idx} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", background:C.bgDeep, borderRadius:10 }}>
@@ -992,6 +995,29 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                     <div style={{ fontSize:13, fontWeight:600, color:C.accentDark }}>{fmtMoney((it.price||0)*(it.qty||1))}</div>
                     <div style={{ fontSize:11, color:C.muted }}>成本 {fmtMoney((it.cost||0)*(it.qty||1))}</div>
                   </div>
+                  <button onClick={async () => {
+                    if (!window.confirm(`確定刪除「${it.name}」?`)) return;
+                    const newItems = (o.items||[]).filter((_, i) => i !== idx);
+                    if (newItems.length === 0) {
+                      if (!window.confirm("這是訂單最後一個品項,刪除後訂單將沒有商品。確定?")) return;
+                    }
+                    // 重新計算總金額與利潤
+                    const newTotal  = newItems.reduce((s, x) => s + (Number(x.price)||0) * (Number(x.qty)||1), 0);
+                    const newCost   = newItems.reduce((s, x) => s + (Number(x.cost)||0)  * (Number(x.qty)||1), 0);
+                    const newProfit = newTotal - newCost;
+                    const { error } = await supabase
+                      .from("orders")
+                      .update({ items: newItems, total: newTotal, profit: newProfit, updated_at: new Date().toISOString() })
+                      .eq("id", o.id);
+                    if (error) { toast(`刪除失敗:${error.message||"未知錯誤"}`); return; }
+                    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, items: newItems, total: newTotal, profit: newProfit } : x) }));
+                    logAction("刪除訂單品項", `#${o.no} · ${it.name}`);
+                    toast("已刪除品項");
+                  }}
+                    title="刪除此品項"
+                    style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:18, lineHeight:1, padding:"4px 8px", flexShrink:0, opacity:.6, transition:"opacity .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                    onMouseLeave={e => e.currentTarget.style.opacity = .6}>×</button>
                 </div>
               ))}
             </div>
