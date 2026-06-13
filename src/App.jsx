@@ -585,10 +585,25 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "announcements" }, payload => {
         setData(d => ({ ...d, announcements: d.announcements.filter(a => a.id !== payload.old.id) }));
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log("📡 Realtime status:", status);
+        if (status === "SUBSCRIBED") {
+          console.log("✅ Realtime 訂閱成功,將即時收到新訂單/客人/商品變更");
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("❌ Realtime 訂閱失敗,將仰賴 30 秒輪詢備援");
+        }
+      });
 
-    return () => sub.unsubscribe();
-  }, []);
+    // 心跳輪詢備援:每 30 秒重拉一次,防止 Realtime 漏接
+    const heartbeat = setInterval(() => {
+      reloadData();
+    }, 30000);
+
+    return () => {
+      sub.unsubscribe();
+      clearInterval(heartbeat);
+    };
+  }, [reloadData]);
 
   // ── LINE 推播通知 ───────────────────────────────────────────
   const sendLineNotify = async (lineUserIds, message) => {
@@ -718,7 +733,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
         {tab === "archive"       && <ArchivePage       data={data} setData={setData} toast={showToast} />}
         {tab === "auditlog"      && <AuditLogPage />}
-        {tab === "more"          && <MorePage tabs={TABS_MORE} onSelect={setTab} onLogout={onLogout} credentials={credentials} />}
+        {tab === "more"          && <MorePage tabs={TABS_MORE} onSelect={setTab} onLogout={onLogout} credentials={credentials} reloadData={reloadData} toast={showToast} />}
       </div>
 
       {/* 手機底部分頁 */}
@@ -744,9 +759,23 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
 }
 
 // ─── More Page (手機版「更多」抽屜式選單) ────────────────────
-function MorePage({ tabs, onSelect, onLogout, credentials }) {
+function MorePage({ tabs, onSelect, onLogout, credentials, reloadData, toast }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const doRefresh = async () => {
+    setRefreshing(true);
+    try { await reloadData(); toast?.("✅ 資料已重新載入"); } catch (e) { toast?.("重新整理失敗"); }
+    setTimeout(() => setRefreshing(false), 500);
+  };
+
   return (
     <div style={{ padding: "8px 16px 24px" }}>
+      {/* 重新整理按鈕 */}
+      <button onClick={doRefresh} disabled={refreshing}
+        style={{ width: "100%", marginBottom: 16, padding: "12px", background: C.accentBg, color: C.accent, border: `0.5px solid ${C.accent}40`, borderRadius: 14, fontSize: 13, fontWeight: 500, cursor: refreshing?"wait":"pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <Icon name="refresh" size={15} style={{ animation: refreshing?"spin 1s linear infinite":"none" }} />
+        {refreshing ? "重新載入中..." : "重新整理所有資料"}
+      </button>
+
       <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1.5, padding: "8px 4px 12px" }}>更多功能</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tabs.map(t => (
