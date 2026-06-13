@@ -889,7 +889,7 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
 
   const cost = (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
   const total = o.total || 0;
-  const deposit = Number(o.deposit) || 0;
+  const deposit = Number(o.deposit) || Number(o.deposit_amount) || 0;
   const shippingFee = Number(o.shipping_fee) || 0;
   const finalPayment = Math.max(0, total + shippingFee - deposit);
   const totalPaid = (o.deposit_paid ? deposit : 0) + (o.final_paid ? finalPayment : 0);
@@ -1053,6 +1053,7 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                       <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
                         {o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":""}
                         {o.bank_code?` (${o.bank_code})`:""}
+                        {o.deposit_last5?` · 末5碼:${o.deposit_last5}`:""}
                         {o.payment_date?` · ${o.payment_date}`:""}
                       </div>
                     </div>
