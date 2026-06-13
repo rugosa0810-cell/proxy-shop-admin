@@ -484,9 +484,9 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     };
   }, []);
 
-  // ── 從 Supabase 載入資料 + 即時訂閱 ─────────────────────────
-  useEffect(() => {
-    Promise.all([
+  // 把載入邏輯抽成可重用函式
+  const reloadData = useCallback(() => {
+    return Promise.all([
       supabase.from("orders").select("*").order("created_at", { ascending: false }),
       supabase.from("products").select("*").order("created_at", { ascending: false }),
       supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
@@ -494,7 +494,6 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       supabase.from("wishlist").select("*").order("created_at", { ascending: false }),
       supabase.from("members").select("*"),
     ]).then(([o, p, s, a, w, m]) => {
-      // 個別檢查每個表是否有錯
       if (o.error) console.error("orders 載入失敗:", o.error);
       if (p.error) console.error("products 載入失敗:", p.error);
       if (s.error) console.error("in_stock 載入失敗:", s.error);
@@ -515,6 +514,19 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       }));
       console.log(`📊 已載入: 訂單 ${(o.data||[]).length}, 商品 ${(p.data||[]).length}, 會員 ${(m.data||[]).length}, 許願 ${(w.data||[]).length}`);
     }).catch(err => console.error("Supabase 載入失敗", err));
+  }, []);
+
+  // 切換分頁時自動重新拉資料
+  useEffect(() => {
+    if (["orders", "catalog", "customers", "instock", "wishlist", "archive"].includes(tab)) {
+      reloadData();
+    }
+  }, [tab, reloadData]);
+
+  // ── 從 Supabase 載入資料 + 即時訂閱 ─────────────────────────
+  useEffect(() => {
+    reloadData();
+
 
     // 即時訂閱新訂單
     const sub = supabase
