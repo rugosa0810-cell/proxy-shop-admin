@@ -3095,6 +3095,38 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
   const [error, setError] = useState("");
   const [strength, setStrength] = useState(0); // 0-4
 
+  // 賣貨便連結 state
+  const [shopeeUrl, setShopeeUrl] = useState("");
+  const [shopeeLoading, setShopeeLoading] = useState(true);
+  const [shopeeSaving, setShopeeSaving] = useState(false);
+
+  // 載入目前設定
+  useEffect(() => {
+    supabase.from("settings").select("*").eq("key", "shopee_ship_url").maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setShopeeUrl(data.value);
+        setShopeeLoading(false);
+      })
+      .catch(() => setShopeeLoading(false));
+  }, []);
+
+  const saveShopeeUrl = async () => {
+    setShopeeSaving(true);
+    const url = sanitize(shopeeUrl, 500);
+    try {
+      const { error } = await supabase.from("settings").upsert([
+        { key: "shopee_ship_url", value: url, updated_at: new Date().toISOString() }
+      ], { onConflict: "key" });
+      if (error) throw error;
+      logAction("更新賣貨便連結", url);
+      toast("賣貨便連結已儲存 ✅");
+    } catch (e) {
+      console.error(e);
+      toast(`儲存失敗:${e.message || "請檢查 settings 表存在"}`);
+    }
+    setShopeeSaving(false);
+  };
+
   // Password strength checker
   const checkStrength = (pw) => {
     let score = 0;
@@ -3151,7 +3183,28 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>🔐 帳號密碼設定</div>
+
+      {/* 賣貨便連結設定 */}
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📦 出貨設定</div>
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.7 }}>
+          這個連結會出現在客人「出貨頁」的「下一步至賣貨便結單」按鈕,客人點下去會開啟此網址。
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display: "block", marginBottom: 6 }}>賣貨便商店連結</label>
+            <input value={shopeeUrl} onChange={e => setShopeeUrl(e.target.value)}
+              placeholder="https://shopee.tw/m/你的賣貨便網址" disabled={shopeeLoading}
+              style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing: "border-box" }} />
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>留空則客人看不到結單按鈕</div>
+          </div>
+          <Btn onClick={saveShopeeUrl} disabled={shopeeSaving||shopeeLoading}>
+            {shopeeSaving ? "儲存中..." : shopeeLoading ? "載入中..." : "儲存連結"}
+          </Btn>
+        </div>
+      </Card>
+
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark, marginTop: 4 }}>🔐 帳號密碼設定</div>
       <Card>
         <div style={{ fontSize: 13, color: C.muted, marginBottom: 16, padding: "10px 14px", background: C.yellowBg, borderRadius: 10, borderLeft: `3px solid ${C.yellow}` }}>⚠️ 修改後將自動登出，需重新輸入新密碼</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
