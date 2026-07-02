@@ -1207,8 +1207,18 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                 <button onClick={async()=>{
                   if(!window.confirm(`確定封存訂單 #${o.no}？`))return;
                   const now=new Date().toISOString();
-                  const{error}=await supabase.from("orders").update({archived:true,archived_at:now}).eq("id",o.id);
-                  if(!error){setData(d=>({...d,orders:d.orders.map(x=>x.id===o.id?{...x,archived:true,archived_at:now}:x)}));toast("已封存 📦");}
+                  const{data:updated,error}=await supabase.from("orders").update({archived:true,archived_at:now}).eq("id",o.id).select();
+                  if(error){
+                    console.error("封存失敗:",error);
+                    toast(`封存失敗:${error.message || "資料庫可能缺 archived 欄位"}`);
+                    return;
+                  }
+                  if(!updated || updated.length === 0){
+                    toast("封存失敗:資料未更新,請檢查 Supabase 的 archived 欄位是否存在");
+                    return;
+                  }
+                  setData(d=>({...d,orders:d.orders.map(x=>x.id===o.id?{...x,archived:true,archived_at:now}:x)}));
+                  toast("已封存 📦");
                 }} style={{ background:"#eaede8",border:"none",color:"#3d4a3e",padding:"0 10px",height:30,borderRadius:8,fontSize:11,cursor:"pointer",fontWeight:600 }}>📦 封存</button>
               )}
               <button onClick={()=>del(o.id)} style={{ background:C.redBg,border:"none",color:C.red,width:30,height:30,borderRadius:8,fontSize:15,cursor:"pointer" }}>🗑</button>
