@@ -1057,7 +1057,7 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
           <div style={{ padding:"14px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
               <div style={{ fontSize:11, color:C.muted, fontWeight:600, letterSpacing:.5 }}>商品明細</div>
-              <div style={{ fontSize:10, color:C.faint }}>長按或點 × 可刪除品項</div>
+              <div style={{ fontSize:10, color:C.faint }}>點「成本」修改 · × 刪除</div>
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {(o.items||[]).map((it,idx)=>(
@@ -1073,7 +1073,28 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
                     <div style={{ fontSize:13, fontWeight:600, color:C.accentDark }}>{fmtMoney((it.price||0)*(it.qty||1))}</div>
-                    <div style={{ fontSize:11, color:C.muted }}>成本 {fmtMoney((it.cost||0)*(it.qty||1))}</div>
+                    <button onClick={async e => {
+                      e.stopPropagation();
+                      const currentCost = it.cost || 0;
+                      const input = window.prompt(`請輸入「${it.name}」的單價成本 NT$(目前:${currentCost})`, String(currentCost));
+                      if (input === null) return;
+                      const newCost = Math.max(0, Number(input) || 0);
+                      const newItems = (o.items||[]).map((x, i) => i === idx ? { ...x, cost: newCost } : x);
+                      const newTotal  = newItems.reduce((s, x) => s + (Number(x.price)||0) * (Number(x.qty)||1), 0);
+                      const newCostSum = newItems.reduce((s, x) => s + (Number(x.cost)||0) * (Number(x.qty)||1), 0);
+                      const newProfit = newTotal - newCostSum;
+                      const { error } = await supabase.from("orders")
+                        .update({ items: newItems, total: newTotal, profit: newProfit, updated_at: new Date().toISOString() })
+                        .eq("id", o.id);
+                      if (error) { toast(`更新失敗:${error.message||"未知錯誤"}`); return; }
+                      setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, items: newItems, total: newTotal, profit: newProfit } : x) }));
+                      logAction("修改品項成本", `#${o.no} · ${it.name} · ${currentCost} → ${newCost}`);
+                      toast("已更新成本");
+                    }}
+                      title="點擊修改成本"
+                      style={{ background:"none", border:"none", fontSize:11, color:C.muted, cursor:"pointer", padding:"1px 4px", textDecoration:"underline dotted", textUnderlineOffset:2 }}>
+                      成本 {fmtMoney((it.cost||0)*(it.qty||1))}
+                    </button>
                   </div>
                   <button onClick={async () => {
                     if (!window.confirm(`確定刪除「${it.name}」?`)) return;
@@ -2463,8 +2484,11 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
 
   // ── 從訂單動態彙整客人清單 ──────────────────────────────────
   // 不依賴 data.customers，直接從 data.orders 聚合
-  // key = customer_line_id（Supabase）或 customerId（本機）
-  const uniqueCustomerOrders = Array.from(new Map(data.orders.map(o => [o.id, o])).values());
+  // key = customer_line_id(Supabase)或 customerId(本機)
+  // 過濾掉封存訂單
+  const uniqueCustomerOrders = Array.from(new Map(
+    data.orders.filter(o => !o.archived).map(o => [o.id, o])
+  ).values());
   const customerMap = {};
   uniqueCustomerOrders.forEach(o => {
     const key   = o.customer_line_id || o.customerId || o.customerName;
