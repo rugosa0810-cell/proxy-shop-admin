@@ -1760,6 +1760,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
   const [deadline, setDeadline] = useState(product?.deadline || "");
   const [expectedArrival, setExpectedArrival] = useState(product?.expected_arrival || "");
+  const [paymentType, setPaymentType] = useState(product?.payment_type || "full"); // full=付全款, deposit=先付訂金, cod=貨到付款
+  const [depositAmount, setDepositAmount] = useState(product?.deposit_amount ? String(product.deposit_amount) : "");
   const [variants, setVariants] = useState(() => {
     const initRate = Number(product?.rate) || rate || 0;
     return (product?.variants || []).map(v => ({
@@ -1819,6 +1821,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       image: image,
       deadline: deadline || null,
       expected_arrival: expectedArrival || null,
+      payment_type: paymentType || "full",
+      deposit_amount: paymentType === "deposit" ? (Number(depositAmount) || 0) : 0,
       status: product?.status || "on",
       variants,
     });
@@ -1865,6 +1869,39 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
               <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>顯示給客人參考</div>
             </div>
           </div>
+        </div>
+
+        {/* 付款方式設定 */}
+        <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
+          <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>💰 付款方式</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {[
+              { val:"full",    label:"付全款",    desc:"客人下單時付清全額" },
+              { val:"deposit", label:"先付訂金",  desc:"客人先付訂金,尾款到台後在賣貨便付" },
+              { val:"cod",     label:"貨到付款",  desc:"客人不需先付,到貨時付款" },
+            ].map(opt => (
+              <label key={opt.val}
+                style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"11px 13px", borderRadius:10, cursor:"pointer",
+                  background: paymentType===opt.val ? C.accentBg : C.bg,
+                  border: `1.5px solid ${paymentType===opt.val ? C.accent : C.border}` }}>
+                <input type="radio" name="payment_type" checked={paymentType===opt.val} onChange={()=>setPaymentType(opt.val)}
+                  style={{ marginTop:2, accentColor:C.accent, cursor:"pointer" }}/>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:500, color: paymentType===opt.val ? C.accentDark : C.text }}>{opt.label}</div>
+                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          {paymentType === "deposit" && (
+            <div style={{ marginTop:12, padding:"12px", background:C.accentBg, borderRadius:10, border:`1px dashed ${C.accent}50` }}>
+              <label style={{ fontSize:12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>訂金金額 NT$</label>
+              <input type="number" inputMode="numeric" value={depositAmount} onChange={e => setDepositAmount(e.target.value)}
+                placeholder="例如:800"
+                style={{ width:"100%", background: "#fff", border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }}/>
+              <div style={{ fontSize:11, color:C.muted, marginTop:6 }}>客人下單時要先付的金額,剩餘金額到貨後在賣貨便結算</div>
+            </div>
+          )}
         </div>
 
         {/* Image upload section */}
