@@ -982,7 +982,46 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
       {expanded && (
         <div style={{ borderTop:`1px solid ${C.border}` }}>
 
-          {/* 區塊一：訂單概覽 */}
+          {/* 待審核訂單:接受 / 拒絕 快速鈕 */}
+          {o.status === "pending_review" && (
+            <div style={{ padding:"14px", background:C.purpleBg, display:"flex", gap:8, borderBottom:`1px solid ${C.border}` }}>
+              <button onClick={async e => {
+                e.stopPropagation();
+                if (!window.confirm("確定接受此訂單?")) return;
+                const { error } = await supabase.from("orders").update({ status: "pending", updated_at: new Date().toISOString() }).eq("id", o.id);
+                if (error) { toast?.("更新失敗"); return; }
+                setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, status: "pending" } : x) }));
+                logAction("接受訂單", `#${o.no} → 待採買`);
+                toast?.("✅ 已接受訂單,轉為待採買");
+              }}
+                style={{ flex:1, padding:"11px", background:C.green, color:"#fff", border:"none", borderRadius:10, fontWeight:600, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                <Icon name="check" size={15} /> 接受訂單
+              </button>
+              <button onClick={async e => {
+                e.stopPropagation();
+                const reason = window.prompt("拒絕原因(可選):", "");
+                if (reason === null) return;  // 客人按取消
+                const { error } = await supabase.from("orders").update({
+                  status: "cancelled",
+                  updated_at: new Date().toISOString(),
+                  cancel_reason: reason || "業者拒絕付款"
+                }).eq("id", o.id);
+                if (error) {
+                  // fallback:沒 cancel_reason 欄位
+                  const { error: e2 } = await supabase.from("orders").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", o.id);
+                  if (e2) { toast?.("更新失敗"); return; }
+                }
+                setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, status: "cancelled", cancel_reason: reason || "業者拒絕付款" } : x) }));
+                logAction("拒絕訂單", `#${o.no} · ${reason || "無理由"}`);
+                toast?.("已拒絕訂單");
+              }}
+                style={{ flex:1, padding:"11px", background:C.red, color:"#fff", border:"none", borderRadius:10, fontWeight:600, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                <Icon name="x" size={15} /> 拒絕付款
+              </button>
+            </div>
+          )}
+
+          {/* 區塊一:訂單概覽 */}
           <div style={{ padding:"14px 14px 10px", background:C.bgDeep }}>
             <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:10, letterSpacing:.5 }}>訂單概覽</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
@@ -1092,7 +1131,7 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                         {o.deposit_paid?"✓ 訂金已收":"○ 訂金待收"}
                       </div>
                       <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
-                        {o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":""}
+                        {o.deposit_bank ? o.deposit_bank : (o.payment_method==="transfer"?"匯款":o.payment_method==="cod"?"貨到付款":"")}
                         {o.bank_code?` (${o.bank_code})`:""}
                         {o.deposit_last5?` · 末5碼:${o.deposit_last5}`:""}
                         {o.payment_date?` · ${o.payment_date}`:""}
@@ -1719,6 +1758,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [cat, setCat]           = useState(product?.category || "");
   const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : String(rate || ""));
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
+  const [deadline, setDeadline] = useState(product?.deadline || "");
+  const [expectedArrival, setExpectedArrival] = useState(product?.expected_arrival || "");
   const [variants, setVariants] = useState(() => {
     const initRate = Number(product?.rate) || rate || 0;
     return (product?.variants || []).map(v => ({
@@ -1776,6 +1817,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       price: 0,   // 已棄用,以 variants[].price 為主
       rate: Number(productRate) || 0,
       image: image,
+      deadline: deadline || null,
+      expected_arrival: expectedArrival || null,
       status: product?.status || "on",
       variants,
     });
@@ -1803,6 +1846,25 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
             placeholder="例如 0.23"
             style={{ width:"100%", maxWidth:200, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }} />
           <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>影響本商品所有款式的成本計算</div>
+        </div>
+
+        {/* 結單時間 + 預計到貨 */}
+        <div style={{ borderTop:`1.5px solid ${C.border}`, paddingTop:14 }}>
+          <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>時間設定(選填)</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <div>
+              <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>⏰ 結單日期</label>
+              <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)}
+                style={{ width:"100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }}/>
+              <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>客人下單截止日</div>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>📦 預計到貨</label>
+              <input type="date" value={expectedArrival} onChange={e => setExpectedArrival(e.target.value)}
+                style={{ width:"100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }}/>
+              <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>顯示給客人參考</div>
+            </div>
+          </div>
         </div>
 
         {/* Image upload section */}
@@ -3141,15 +3203,38 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
   const [shopeeLoading, setShopeeLoading] = useState(true);
   const [shopeeSaving, setShopeeSaving] = useState(false);
 
+  // 取消訂單逾期時數
+  const [autoCancelHours, setAutoCancelHours] = useState("36");
+  const [cancelSaving, setCancelSaving] = useState(false);
+
   // 載入目前設定
   useEffect(() => {
-    supabase.from("settings").select("*").eq("key", "shopee_ship_url").maybeSingle()
-      .then(({ data }) => {
-        if (data?.value) setShopeeUrl(data.value);
-        setShopeeLoading(false);
-      })
-      .catch(() => setShopeeLoading(false));
+    Promise.all([
+      supabase.from("settings").select("*").eq("key", "shopee_ship_url").maybeSingle(),
+      supabase.from("settings").select("*").eq("key", "auto_cancel_hours").maybeSingle(),
+    ]).then(([shopee, cancel]) => {
+      if (shopee.data?.value) setShopeeUrl(shopee.data.value);
+      if (cancel.data?.value) setAutoCancelHours(cancel.data.value);
+      setShopeeLoading(false);
+    }).catch(() => setShopeeLoading(false));
   }, []);
+
+  const saveAutoCancel = async () => {
+    setCancelSaving(true);
+    const hours = Math.max(1, Math.min(720, Number(autoCancelHours) || 36));
+    try {
+      const { error } = await supabase.from("settings").upsert([
+        { key: "auto_cancel_hours", value: String(hours), updated_at: new Date().toISOString() }
+      ], { onConflict: "key" });
+      if (error) throw error;
+      logAction("更新逾期取消時數", `${hours} 小時`);
+      toast(`已設定 ${hours} 小時後自動取消 ✅`);
+    } catch (e) {
+      console.error(e);
+      toast(`儲存失敗:${e.message || "未知錯誤"}`);
+    }
+    setCancelSaving(false);
+  };
 
   const saveShopeeUrl = async () => {
     setShopeeSaving(true);
@@ -3241,6 +3326,38 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
           </div>
           <Btn onClick={saveShopeeUrl} disabled={shopeeSaving||shopeeLoading}>
             {shopeeSaving ? "儲存中..." : shopeeLoading ? "載入中..." : "儲存連結"}
+          </Btn>
+        </div>
+      </Card>
+
+      {/* 訂單自動取消設定 */}
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark, marginTop: 4 }}>⏰ 訂單自動取消</div>
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.7 }}>
+          設定客人下單後,若未在此時間內完成匯款通知,訂單將自動取消。
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display: "block", marginBottom: 6 }}>逾期取消時數</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="number" inputMode="numeric" min="1" max="720"
+                value={autoCancelHours} onChange={e => setAutoCancelHours(e.target.value)}
+                disabled={shopeeLoading}
+                style={{ flex: 1, background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing: "border-box" }} />
+              <span style={{ fontSize: 14, color: C.text, fontWeight: 500 }}>小時</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>建議 24-72 小時,最短 1 小時,最長 30 天 (720 小時)</div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[12, 24, 36, 48, 72].map(h => (
+              <button key={h} onClick={() => setAutoCancelHours(String(h))}
+                style={{ padding: "5px 12px", borderRadius: 99, border: `1px solid ${autoCancelHours===String(h)?C.accent:C.border}`, background: autoCancelHours===String(h)?C.accent:"transparent", color: autoCancelHours===String(h)?"#fff":C.textMid, fontSize: 12, cursor: "pointer" }}>
+                {h}h
+              </button>
+            ))}
+          </div>
+          <Btn onClick={saveAutoCancel} disabled={cancelSaving||shopeeLoading}>
+            {cancelSaving ? "儲存中..." : "儲存時數"}
           </Btn>
         </div>
       </Card>
