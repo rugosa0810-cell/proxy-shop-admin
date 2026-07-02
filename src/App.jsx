@@ -1761,7 +1761,6 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [deadline, setDeadline] = useState(product?.deadline || "");
   const [expectedArrival, setExpectedArrival] = useState(product?.expected_arrival || "");
   const [paymentType, setPaymentType] = useState(product?.payment_type || "full"); // full=付全款, deposit=先付訂金, cod=貨到付款
-  const [depositAmount, setDepositAmount] = useState(product?.deposit_amount ? String(product.deposit_amount) : "");
   const [variants, setVariants] = useState(() => {
     const initRate = Number(product?.rate) || rate || 0;
     return (product?.variants || []).map(v => ({
@@ -1822,7 +1821,6 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       deadline: deadline || null,
       expected_arrival: expectedArrival || null,
       payment_type: paymentType || "full",
-      deposit_amount: paymentType === "deposit" ? (Number(depositAmount) || 0) : 0,
       status: product?.status || "on",
       variants,
     });
@@ -1895,11 +1893,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
           </div>
           {paymentType === "deposit" && (
             <div style={{ marginTop:12, padding:"12px", background:C.accentBg, borderRadius:10, border:`1px dashed ${C.accent}50` }}>
-              <label style={{ fontSize:12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>訂金金額 NT$</label>
-              <input type="number" inputMode="numeric" value={depositAmount} onChange={e => setDepositAmount(e.target.value)}
-                placeholder="例如:800"
-                style={{ width:"100%", background: "#fff", border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing:"border-box" }}/>
-              <div style={{ fontSize:11, color:C.muted, marginTop:6 }}>客人下單時要先付的金額,剩餘金額到貨後在賣貨便結算</div>
+              <div style={{ fontSize:12, color:C.accentDark, fontWeight:600, marginBottom:4 }}>💡 各款式訂金請至下方「款式設定」個別填寫</div>
+              <div style={{ fontSize:11, color:C.muted, lineHeight:1.6 }}>每個款式可以有不同的訂金金額,例如「兔兔」訂金 NT$300,「小八」訂金 NT$500</div>
             </div>
           )}
         </div>
@@ -2005,6 +2000,17 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                         onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, cost:Number(e.target.value)||0} : x))}
                         style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, color:C.red, fontWeight:600, boxSizing:"border-box", minWidth:0 }}/>
                     </div>
+                    {/* 訂金欄位:只在商品付款方式為「先付訂金」時顯示 */}
+                    {paymentType === "deposit" && (
+                      <div>
+                        <div style={{ fontSize:10, color:C.accent, marginBottom:3, fontWeight:600 }}>💰 訂金 NT$</div>
+                        <input type="number" inputMode="numeric" value={v.deposit_amount||0}
+                          onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, deposit_amount:Number(e.target.value)||0} : x))}
+                          placeholder="0"
+                          style={{ width:"100%", background:C.accentBg, border:`1px solid ${C.accent}40`, borderRadius:8, padding:"8px 10px", fontSize:14, color:C.accentDark, fontWeight:600, boxSizing:"border-box", minWidth:0 }}/>
+                        <div style={{ fontSize:9, color:C.muted, marginTop:3 }}>剩餘 NT${Math.max(0, (Number(v.price)||0) - (Number(v.deposit_amount)||0))} 於取貨時付</div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
