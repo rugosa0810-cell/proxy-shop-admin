@@ -1791,6 +1791,34 @@ function CatalogPage({ data, setData, toast }) {
 
 function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const isEdit = !!product;
+  // 客人端 LIFF URL(改成你自己的)
+  const CUSTOMER_LIFF_URL = "https://liff.line.me/2009872512-JJAaJ7Bi";
+
+  const shareProduct = async () => {
+    if (!product) return;
+    const shareData = {
+      title: product.name || "分享商品",
+      text: `🛍 ${product.name}\n\n點連結加入我的購物車!`,
+      url: `${CUSTOMER_LIFF_URL}?product=${encodeURIComponent(product.id)}`,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        // fallback:複製到剪貼簿
+        await navigator.clipboard.writeText(`${shareData.text}\n${shareData.url}`);
+        alert("✅ 分享連結已複製到剪貼簿");
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        // 用戶取消分享不算錯
+        console.error(e);
+        // 最後 fallback:提示手動複製
+        window.prompt("請複製此連結分享:", `${shareData.text}\n${shareData.url}`);
+      }
+    }
+  };
+
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
   const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : String(rate || ""));
@@ -1866,6 +1894,21 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   return (
     <Modal title={isEdit ? "編輯商品" : "新增賣場商品"} onClose={onClose} wide>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        {/* 分享區 (只在編輯已存在商品時顯示) */}
+        {isEdit && (
+          <div style={{ background: `linear-gradient(135deg, ${C.accentBg} 0%, ${C.pinkBg} 100%)`, borderRadius: 12, padding: "14px 16px", border: `1px dashed ${C.accent}60` }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 12, color: C.accentDark, fontWeight: 700, marginBottom: 3 }}>🔗 分享商品連結</div>
+                <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.5 }}>分享到 LINE / IG / FB,客人點連結直接進購物頁</div>
+              </div>
+              <button type="button" onClick={shareProduct}
+                style={{ background: C.accent, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                <Icon name="share" size={14} /> 分享連結
+              </button>
+            </div>
+          </div>
+        )}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
           <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
           <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
@@ -2140,8 +2183,26 @@ function PurchasePage({ data, setData, toast, setTab }) {
     data.orders.filter(o => o.status === "pending" && !o.archived).map(o => o.id)
   ).size;
 
+  // 勾選狀態:key = `productName|||variantName`
+  const [selected, setSelected] = useState(new Set());
+
+  // 所有款式的 key
+  const allKeys = grouped.flatMap(([pn, vs]) => vs.map(v => `${pn}|||${v.variantName}`));
+  const allSelected = allKeys.length > 0 && allKeys.every(k => selected.has(k));
+
+  const toggleKey = (key) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(allKeys));
+  };
+
   const markVariantBought = async (productName, variantName) => {
-    // 找出這個商品+款式相關的所有 order id
     const affectedOrderIds = new Set();
     data.orders.filter(o => o.status === "pending" && !o.archived).forEach(o => {
       const has = (o.items || []).some(it => {
@@ -2156,7 +2217,6 @@ function PurchasePage({ data, setData, toast, setTab }) {
 
     if (!window.confirm(`此款式共 ${affectedOrderIds.size} 筆訂單,全部標記為「已採買」?`)) return;
 
-    // 批次更新狀態
     const now = new Date().toISOString();
     const ids = Array.from(affectedOrderIds);
     const { error } = await supabase.from("orders")
@@ -2171,8 +2231,42 @@ function PurchasePage({ data, setData, toast, setTab }) {
     toast(`✅ 已標記 ${ids.length} 筆為已採買`);
   };
 
+  // 批次標記已採買(用勾選的款式)
+  const batchMarkBought = async () => {
+    if (selected.size === 0) { toast("請先勾選要標記的款式"); return; }
+
+    // 找出所有勾選款式相關的訂單
+    const affectedOrderIds = new Set();
+    data.orders.filter(o => o.status === "pending" && !o.archived).forEach(o => {
+      const hasMatch = (o.items || []).some(it => {
+        const parts = String(it.name).split(" / ");
+        const p = parts[0] || it.name;
+        const v = parts.slice(1).join(" / ") || "(單一款式)";
+        return selected.has(`${p}|||${v}`);
+      });
+      if (hasMatch) affectedOrderIds.add(o.id);
+    });
+    if (affectedOrderIds.size === 0) { toast("找不到相關訂單"); return; }
+
+    if (!window.confirm(`已勾選 ${selected.size} 款,共 ${affectedOrderIds.size} 筆訂單,全部標記為「已採買」?`)) return;
+
+    const now = new Date().toISOString();
+    const ids = Array.from(affectedOrderIds);
+    const { error } = await supabase.from("orders")
+      .update({ status: "bought", updated_at: now })
+      .in("id", ids);
+    if (error) { toast(`更新失敗:${error.message}`); return; }
+    setData(d => ({
+      ...d,
+      orders: d.orders.map(o => ids.includes(o.id) ? { ...o, status: "bought" } : o)
+    }));
+    logAction("批次標記已採買", `${selected.size} 款 · ${ids.length} 筆`);
+    toast(`✅ 已標記 ${ids.length} 筆為已採買`);
+    setSelected(new Set());
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: selected.size > 0 ? 80 : 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📋 採購清單</div>
@@ -2180,10 +2274,18 @@ function PurchasePage({ data, setData, toast, setTab }) {
             {grouped.length} 個商品 · 共 {totalItems} 件 · {totalOrders} 筆訂單
           </div>
         </div>
-        <button onClick={() => setTab("inbound")}
-          style={{ background: C.accent, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-          前往入庫配貨 →
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {allKeys.length > 0 && (
+            <button onClick={toggleAll}
+              style={{ background: allSelected ? C.accent : "transparent", color: allSelected ? "#fff" : C.accent, border: `1.5px solid ${C.accent}`, padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              {allSelected ? "☑ 取消全選" : "☐ 全選"}
+            </button>
+          )}
+          <button onClick={() => setTab("inbound")}
+            style={{ background: C.accent, color: "#fff", border: "none", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+            入庫配貨 →
+          </button>
+        </div>
       </div>
 
       {grouped.length === 0 ? (
@@ -2199,30 +2301,56 @@ function PurchasePage({ data, setData, toast, setTab }) {
               <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{variants.length} 款 · 共 {variants.reduce((s, v) => s + v.count, 0)} 件</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column" }}>
-              {variants.map((v, i) => (
-                <div key={i} style={{ padding: "12px 16px", borderTop: i > 0 ? `1px dashed ${C.borderLight}` : "none" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{v.variantName}</div>
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>需 {v.count} 件</div>
-                    </div>
-                    <button onClick={() => markVariantBought(productName, v.variantName)}
-                      style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                      ✓ 已採買
-                    </button>
-                  </div>
-                  <div style={{ paddingLeft: 8, borderLeft: `2px solid ${C.borderLight}`, marginTop: 8 }}>
-                    {v.orderRefs.map((r, ri) => (
-                      <div key={ri} style={{ fontSize: 11, color: C.textMid, padding: "2px 8px" }}>
-                        · #{r.orderNo} · {r.customer} × {r.qty}
+              {variants.map((v, i) => {
+                const key = `${productName}|||${v.variantName}`;
+                const isSelected = selected.has(key);
+                return (
+                  <div key={i} style={{ padding: "12px 16px", borderTop: i > 0 ? `1px dashed ${C.borderLight}` : "none", background: isSelected ? C.accentBg : "transparent", transition: "background .15s" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleKey(key)}
+                        style={{ width: 18, height: 18, accentColor: C.accent, cursor: "pointer", flexShrink: 0 }}/>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{v.variantName}</div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>需 {v.count} 件</div>
                       </div>
-                    ))}
+                      <button onClick={() => markVariantBought(productName, v.variantName)}
+                        style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                        ✓ 已採買
+                      </button>
+                    </div>
+                    <div style={{ paddingLeft: 28, marginTop: 8 }}>
+                      {v.orderRefs.map((r, ri) => (
+                        <div key={ri} style={{ fontSize: 11, color: C.textMid, padding: "2px 0" }}>
+                          · #{r.orderNo} · {r.customer} × {r.qty}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         ))
+      )}
+
+      {/* 底部浮動:批次操作條 */}
+      {selected.size > 0 && (
+        <div style={{ position: "fixed", bottom: 12, left: 12, right: 12, background: "#fff", boxShadow: "0 4px 20px rgba(0,0,0,.15)", borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, border: `1.5px solid ${C.accent}`, zIndex: 100 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark }}>已勾選 {selected.size} 款</div>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>點下方一鍵全部標記已採買</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setSelected(new Set())}
+              style={{ background: "transparent", color: C.muted, border: `1px solid ${C.border}`, padding: "8px 12px", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>
+              清除
+            </button>
+            <button onClick={batchMarkBought}
+              style={{ background: C.green, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              ✓ 標記已採買
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
