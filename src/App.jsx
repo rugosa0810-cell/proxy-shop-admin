@@ -1075,7 +1075,9 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:500, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
-                      {it.purchased && <span style={{ background:C.green, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>✓ 已採買</span>}
+                      {it.stocked
+                        ? <span style={{ background:C.green, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>✓ 已配貨</span>
+                        : it.purchased && <span style={{ background:C.accent, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>已採買待配貨</span>}
                       <span>{it.name}</span>
                     </div>
                     <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>×{it.qty}</div>
