@@ -662,7 +662,9 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     { id: "more",      label: "更多",   icon: "grid-dots" },
   ];
   const TABS_MORE = [
-    { id: "instock",   label: "現貨",       icon: "package" },
+    { id: "purchase",  label: "採購清單",   icon: "clipboard-list" },
+    { id: "inbound",   label: "入庫配貨",   icon: "package-import" },
+    { id: "instock",   label: "現貨/庫存",  icon: "package" },
     { id: "wishlist",  label: "許願清單",   icon: "star" },
     { id: "archive",   label: "封存區",     icon: "archive" },
     { id: "auditlog",  label: "操作日誌",   icon: "shield" },
@@ -740,6 +742,8 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "review"        && <ReviewPage        data={data} setData={setData} toast={showToast} />}
         {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} mobile={mobile} />}
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
+        {tab === "purchase"      && <PurchasePage      data={data} setData={setData} toast={showToast} setTab={setTab} />}
+        {tab === "inbound"       && <InboundPage       data={data} setData={setData} toast={showToast} setTab={setTab} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
@@ -2090,6 +2094,282 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+// 品項聚合 helper:把所有 pending 訂單的 items 聚合成 { productName, variantName, count, orders[] }
+function aggregatePendingItems(orders) {
+  const pendingOrders = orders.filter(o => o.status === "pending" && !o.archived);
+  const groups = new Map(); // key = "商品|款式"
+  pendingOrders.forEach(o => {
+    (o.items || []).forEach(it => {
+      // it.name 通常是 "商品名 / 款式:xxx" 的格式
+      const parts = String(it.name).split(" / ");
+      const productName = parts[0] || it.name;
+      const variantName = parts.slice(1).join(" / ") || "(單一款式)";
+      const key = `${productName}|||${variantName}`;
+      if (!groups.has(key)) {
+        groups.set(key, { productName, variantName, count: 0, orderRefs: [] });
+      }
+      const g = groups.get(key);
+      g.count += (Number(it.qty) || 1);
+      g.orderRefs.push({
+        orderId: o.id,
+        orderNo: o.no,
+        customer: o.customer_name || "未名",
+        qty: Number(it.qty) || 1,
+        image: it.image,
+      });
+    });
+  });
+  // 分群:同商品的款式擺在一起
+  const byProduct = new Map();
+  Array.from(groups.values()).forEach(g => {
+    if (!byProduct.has(g.productName)) byProduct.set(g.productName, []);
+    byProduct.get(g.productName).push(g);
+  });
+  return Array.from(byProduct.entries()); // [[productName, [variantGroups...]]]
+}
+
+function PurchasePage({ data, setData, toast, setTab }) {
+  const grouped = aggregatePendingItems(data.orders);
+  const totalItems = grouped.reduce((s, [, vs]) => s + vs.reduce((ss, v) => ss + v.count, 0), 0);
+  const totalOrders = new Set(
+    data.orders.filter(o => o.status === "pending" && !o.archived).map(o => o.id)
+  ).size;
+
+  const markVariantBought = async (productName, variantName) => {
+    // 找出這個商品+款式相關的所有 order id
+    const affectedOrderIds = new Set();
+    data.orders.filter(o => o.status === "pending" && !o.archived).forEach(o => {
+      const has = (o.items || []).some(it => {
+        const parts = String(it.name).split(" / ");
+        const p = parts[0] || it.name;
+        const v = parts.slice(1).join(" / ") || "(單一款式)";
+        return p === productName && v === variantName;
+      });
+      if (has) affectedOrderIds.add(o.id);
+    });
+    if (affectedOrderIds.size === 0) { toast("找不到相關訂單"); return; }
+
+    if (!window.confirm(`此款式共 ${affectedOrderIds.size} 筆訂單,全部標記為「已採買」?`)) return;
+
+    // 批次更新狀態
+    const now = new Date().toISOString();
+    const ids = Array.from(affectedOrderIds);
+    const { error } = await supabase.from("orders")
+      .update({ status: "bought", updated_at: now })
+      .in("id", ids);
+    if (error) { toast(`更新失敗:${error.message}`); return; }
+    setData(d => ({
+      ...d,
+      orders: d.orders.map(o => ids.includes(o.id) ? { ...o, status: "bought" } : o)
+    }));
+    logAction("批次標記已採買", `${productName} · ${variantName} · ${ids.length} 筆`);
+    toast(`✅ 已標記 ${ids.length} 筆為已採買`);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📋 採購清單</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+            {grouped.length} 個商品 · 共 {totalItems} 件 · {totalOrders} 筆訂單
+          </div>
+        </div>
+        <button onClick={() => setTab("inbound")}
+          style={{ background: C.accent, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          前往入庫配貨 →
+        </button>
+      </div>
+
+      {grouped.length === 0 ? (
+        <Card style={{ padding: "48px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>✨</div>
+          <div style={{ fontSize: 14, color: C.muted }}>目前沒有待採買的訂單</div>
+        </Card>
+      ) : (
+        grouped.map(([productName, variants]) => (
+          <Card key={productName} style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px", background: C.accentBg, borderBottom: `1px solid ${C.borderLight}` }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.accentDark }}>{productName}</div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{variants.length} 款 · 共 {variants.reduce((s, v) => s + v.count, 0)} 件</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {variants.map((v, i) => (
+                <div key={i} style={{ padding: "12px 16px", borderTop: i > 0 ? `1px dashed ${C.borderLight}` : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{v.variantName}</div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>需 {v.count} 件</div>
+                    </div>
+                    <button onClick={() => markVariantBought(productName, v.variantName)}
+                      style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                      ✓ 已採買
+                    </button>
+                  </div>
+                  <div style={{ paddingLeft: 8, borderLeft: `2px solid ${C.borderLight}`, marginTop: 8 }}>
+                    {v.orderRefs.map((r, ri) => (
+                      <div key={ri} style={{ fontSize: 11, color: C.textMid, padding: "2px 8px" }}>
+                        · #{r.orderNo} · {r.customer} × {r.qty}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+// 入庫配貨:列出「已採買」但尚未「已到台」的款式聚合,讓業者登記買到多少
+function InboundPage({ data, setData, toast, setTab }) {
+  // 從已採買(bought)訂單聚合
+  const boughtOrders = data.orders.filter(o => o.status === "bought" && !o.archived);
+  const groups = new Map();
+  boughtOrders.forEach(o => {
+    (o.items || []).forEach(it => {
+      const parts = String(it.name).split(" / ");
+      const productName = parts[0] || it.name;
+      const variantName = parts.slice(1).join(" / ") || "(單一款式)";
+      const key = `${productName}|||${variantName}`;
+      if (!groups.has(key)) groups.set(key, { productName, variantName, needed: 0, orderRefs: [] });
+      const g = groups.get(key);
+      g.needed += (Number(it.qty) || 1);
+      g.orderRefs.push({ orderId: o.id, orderNo: o.no, customer: o.customer_name || "未名", qty: Number(it.qty) || 1 });
+    });
+  });
+  const groupList = Array.from(groups.values());
+
+  // 每個款式業者要輸入「實際買到」
+  const [bought, setBought] = useState({});
+  const setB = (key, val) => setBought(prev => ({ ...prev, [key]: val }));
+
+  const doInboundAll = async () => {
+    if (groupList.length === 0) { toast("沒有可入庫的款式"); return; }
+    if (!window.confirm(`確定入庫 ${groupList.length} 個款式?將把訂單狀態改為「已到台」,多餘的入庫存`)) return;
+
+    let orderCount = 0;
+    let stockCount = 0;
+    for (const g of groupList) {
+      const key = `${g.productName}|||${g.variantName}`;
+      const actualCount = Number(bought[key] ?? g.needed) || g.needed;
+
+      // 更新訂單為已到台
+      const orderIds = g.orderRefs.map(r => r.orderId);
+      const { error: e1 } = await supabase.from("orders")
+        .update({ status: "arrived", updated_at: new Date().toISOString() })
+        .in("id", orderIds);
+      if (e1) { toast(`訂單更新失敗:${e1.message}`); continue; }
+      orderCount += orderIds.length;
+
+      // 多的入庫存
+      const extra = actualCount - g.needed;
+      if (extra > 0) {
+        // 檢查現有 in_stock 是否已有此商品+款式
+        const displayName = `${g.productName}${g.variantName !== "(單一款式)" ? ` / ${g.variantName}` : ""}`;
+        const { data: existing } = await supabase.from("in_stock")
+          .select("*").eq("name", displayName).maybeSingle();
+        if (existing) {
+          const newStock = (Number(existing.stock) || 0) + extra;
+          await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", existing.id);
+        } else {
+          await supabase.from("in_stock").insert([{
+            id: secureUid(),
+            name: displayName,
+            price: 0,
+            stock: extra,
+            image: "",
+            status: "off",  // 預設下架,業者需手動上架
+            created_at: new Date().toISOString(),
+          }]);
+        }
+        stockCount += extra;
+      }
+    }
+
+    // 重新拉資料
+    const [ordersRes, inStockRes] = await Promise.all([
+      supabase.from("orders").select("*").order("created_at", { ascending: false }),
+      supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
+    ]);
+    setData(d => ({ ...d, orders: ordersRes.data || d.orders, inStock: inStockRes.data || d.inStock }));
+
+    logAction("批次入庫配貨", `${groupList.length} 款式 · ${orderCount} 筆訂單 · 入庫存 ${stockCount} 件`);
+    toast(`✅ 已配貨 ${orderCount} 筆訂單${stockCount > 0 ? ` · ${stockCount} 件入庫存` : ""}`);
+    setBought({});
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📦 入庫配貨</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+            填「實際買到」數量,一鍵配貨並自動入庫
+          </div>
+        </div>
+      </div>
+
+      {groupList.length === 0 ? (
+        <Card style={{ padding: "48px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
+          <div style={{ fontSize: 14, color: C.muted, marginBottom: 4 }}>沒有已採買的商品可入庫</div>
+          <div style={{ fontSize: 11, color: C.faint }}>先去採購清單標記「已採買」</div>
+          <button onClick={() => setTab("purchase")}
+            style={{ marginTop: 16, background: C.accent, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, cursor: "pointer" }}>
+            前往採購清單
+          </button>
+        </Card>
+      ) : (
+        <>
+          {groupList.map((g, i) => {
+            const key = `${g.productName}|||${g.variantName}`;
+            const actual = bought[key] ?? g.needed;
+            const extra = Number(actual) - g.needed;
+            return (
+              <Card key={i} style={{ padding: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{g.productName}</div>
+                <div style={{ fontSize: 12, color: C.accent, marginTop: 2, fontWeight: 500 }}>{g.variantName}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, padding: "10px", background: C.bgDeep, borderRadius: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: C.muted }}>需求</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: C.textMid }}>{g.needed} 件</div>
+                  </div>
+                  <div style={{ fontSize: 16, color: C.faint }}>→</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: C.muted }}>實際買到</div>
+                    <input type="number" inputMode="numeric" min="0" value={actual}
+                      onChange={e => setB(key, e.target.value)}
+                      style={{ width: "100%", padding: "5px 8px", fontSize: 16, fontWeight: 700, color: C.accentDark, border: `1.5px solid ${C.accent}`, borderRadius: 6, background: "#fff", boxSizing: "border-box" }}/>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "right" }}>
+                    {extra > 0 ? (
+                      <div style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>✨ +{extra} 入庫</div>
+                    ) : extra < 0 ? (
+                      <div style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>⚠️ 缺 {-extra}</div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: C.muted }}>剛好</div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: C.faint, marginTop: 6 }}>
+                  {g.orderRefs.map(r => `#${r.orderNo} ${r.customer}×${r.qty}`).join(" · ")}
+                </div>
+              </Card>
+            );
+          })}
+          <button onClick={doInboundAll}
+            style={{ background: C.green, color: "#fff", border: "none", padding: "14px", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer", position: "sticky", bottom: 12 }}>
+            ✓ 確認入庫並配貨
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
