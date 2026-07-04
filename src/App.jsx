@@ -2432,51 +2432,69 @@ function InboundPage({ data, setData, toast, setTab }) {
     }
 
     const confirmMsg = skippedCount > 0
-      ? `確定入庫 ${activeGroups.length} 個款式?(${skippedCount} 個款式因數量 0 將跳過)\n多餘的會進庫存,訂單狀態需另外到訂單管理手動改為「已到台」`
-      : `確定入庫 ${activeGroups.length} 個款式?多餘的會進庫存,訂單狀態需另外到訂單管理手動改為「已到台」`;
+      ? `確定入庫 ${activeGroups.length} 個款式?(${skippedCount} 個因數量 0 跳過)\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。多餘的入庫存。`
+      : `確定入庫 ${activeGroups.length} 個款式?\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。多餘的入庫存。`;
     if (!window.confirm(confirmMsg)) return;
 
     let stockCount = 0;
     let processedCount = 0;
+    let allocatedItemCount = 0;   // 有配到貨的品項數
+    let unallocatedItemCount = 0; // 沒配到貨(缺量)的品項數
+
+    // 收集:每筆訂單要更新的品項 idx(只有實際配到的才 stocked)
+    const itemsToMark = new Map(); // orderId → { itemIdxes: Set }
+    const markStocked = (orderId, itemIdx) => {
+      if (!itemsToMark.has(orderId)) itemsToMark.set(orderId, new Set());
+      itemsToMark.get(orderId).add(itemIdx);
+    };
+
     for (const g of activeGroups) {
       const key = `${g.productName}|||${g.variantName}`;
-      const actualCount = Number(bought[key] ?? g.needed);
+      let remaining = Number(bought[key] ?? g.needed);   // 實際買到多少
+      const displayName = `${g.productName}${g.variantName !== "(單一款式)" ? ` / ${g.variantName}` : ""}`;
 
-      // 多的入庫存
-      const extra = actualCount - g.needed;
-      if (extra > 0) {
-        // 檢查現有 in_stock 是否已有此商品+款式
-        const displayName = `${g.productName}${g.variantName !== "(單一款式)" ? ` / ${g.variantName}` : ""}`;
+      // 按 orderRefs 順序配貨(先來後到 → 訂單越早的優先)
+      // 排序:用 orderNo 或 orderId 做穩定排序
+      const sortedRefs = [...g.orderRefs].sort((a, b) => String(a.orderNo).localeCompare(String(b.orderNo)));
+
+      for (const r of sortedRefs) {
+        const need = Number(r.qty) || 1;
+        if (remaining >= need) {
+          // 有貨滿足這筆訂單的這個品項 → 標記 stocked
+          markStocked(r.orderId, r.itemIdx);
+          remaining -= need;
+          allocatedItemCount++;
+        } else {
+          // 貨不夠給這筆 → 這個品項留在配貨清單(不動)
+          unallocatedItemCount++;
+        }
+      }
+
+      // 剩餘的入庫存
+      if (remaining > 0) {
         const { data: existing } = await supabase.from("in_stock")
           .select("*").eq("name", displayName).maybeSingle();
         if (existing) {
-          const newStock = (Number(existing.stock) || 0) + extra;
+          const newStock = (Number(existing.stock) || 0) + remaining;
           await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", existing.id);
         } else {
           await supabase.from("in_stock").insert([{
             id: secureUid(),
             name: displayName,
             price: 0,
-            stock: extra,
+            stock: remaining,
             image: "",
-            status: "off",  // 預設下架,業者需手動上架
+            status: "off",
             created_at: new Date().toISOString(),
           }]);
         }
-        stockCount += extra;
+        stockCount += remaining;
       }
       processedCount++;
     }
 
-    // 在品項層標記 stocked (不是訂單層)
-    // 收集:每筆訂單要更新的品項 idx
-    const orderPatches = new Map(); // orderId → { itemIdxes: Set }
-    activeGroups.forEach(g => {
-      g.orderRefs.forEach(r => {
-        if (!orderPatches.has(r.orderId)) orderPatches.set(r.orderId, new Set());
-        orderPatches.get(r.orderId).add(r.itemIdx);
-      });
-    });
+    // 應用品項 stocked 標記到訂單(可能只有部分品項)
+    const orderPatches = itemsToMark;
 
     const now = new Date().toISOString();
     let allStockedCount = 0;   // 全部品項都入庫完的訂單數
@@ -2513,7 +2531,7 @@ function InboundPage({ data, setData, toast, setTab }) {
     setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
 
     logAction("批次入庫", `${processedCount} 款 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
-    toast(`✅ 已入庫 ${processedCount} 款${stockCount > 0 ? ` · ${stockCount} 件庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單已升級為「已採買」` : ""}`);
+    toast(`✅ 已配貨 ${allocatedItemCount} 件${stockCount > 0 ? ` · ${stockCount} 件庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單完成` : ""}${unallocatedItemCount > 0 ? ` · ⚠️ ${unallocatedItemCount} 件缺量待補` : ""}`);
     setBought({});
   };
 
