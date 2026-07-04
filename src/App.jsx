@@ -1074,7 +1074,10 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                       :it.image||"🛒"}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:500 }}>{it.name}</div>
+                    <div style={{ fontSize:13, fontWeight:500, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                      {it.purchased && <span style={{ background:C.green, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>✓ 已採買</span>}
+                      <span>{it.name}</span>
+                    </div>
                     <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>×{it.qty}</div>
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
@@ -2142,12 +2145,13 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   );
 }
 
-// 品項聚合 helper:把所有 pending 訂單的 items 聚合成 { productName, variantName, count, orders[] }
+// 品項聚合 helper:把所有 pending 訂單的 items(排除已採買的品項)聚合成 { productName, variantName, count, orders[] }
 function aggregatePendingItems(orders) {
   const pendingOrders = orders.filter(o => o.status === "pending" && !o.archived);
   const groups = new Map(); // key = "商品|款式"
   pendingOrders.forEach(o => {
-    (o.items || []).forEach(it => {
+    (o.items || []).forEach((it, itemIdx) => {
+      if (it.purchased) return; // 已採買的品項不列入
       // it.name 通常是 "商品名 / 款式:xxx" 的格式
       const parts = String(it.name).split(" / ");
       const productName = parts[0] || it.name;
@@ -2164,6 +2168,7 @@ function aggregatePendingItems(orders) {
         customer: o.customer_name || "未名",
         qty: Number(it.qty) || 1,
         image: it.image,
+        itemIdx,
       });
     });
   });
@@ -2203,65 +2208,95 @@ function PurchasePage({ data, setData, toast, setTab }) {
   };
 
   const markVariantBought = async (productName, variantName) => {
-    const affectedOrderIds = new Set();
+    // 找出這款式在哪些訂單有 (訂單 → 該款式的品項 index)
+    const affectedOrders = [];
     data.orders.filter(o => o.status === "pending" && !o.archived).forEach(o => {
-      const has = (o.items || []).some(it => {
+      const idxes = [];
+      (o.items || []).forEach((it, i) => {
+        if (it.purchased) return;
         const parts = String(it.name).split(" / ");
         const p = parts[0] || it.name;
         const v = parts.slice(1).join(" / ") || "(單一款式)";
-        return p === productName && v === variantName;
+        if (p === productName && v === variantName) idxes.push(i);
       });
-      if (has) affectedOrderIds.add(o.id);
+      if (idxes.length > 0) affectedOrders.push({ order: o, idxes });
     });
-    if (affectedOrderIds.size === 0) { toast("找不到相關訂單"); return; }
+    if (affectedOrders.length === 0) { toast("找不到相關品項"); return; }
 
-    if (!window.confirm(`此款式共 ${affectedOrderIds.size} 筆訂單,全部標記為「已採買」?`)) return;
+    if (!window.confirm(`此款式共出現在 ${affectedOrders.length} 筆訂單,全部標記為「已採買」?`)) return;
 
+    let statusChangedCount = 0;
+    let purchasedItemCount = 0;
     const now = new Date().toISOString();
-    const ids = Array.from(affectedOrderIds);
-    const { error } = await supabase.from("orders")
-      .update({ status: "bought", updated_at: now })
-      .in("id", ids);
-    if (error) { toast(`更新失敗:${error.message}`); return; }
-    setData(d => ({
-      ...d,
-      orders: d.orders.map(o => ids.includes(o.id) ? { ...o, status: "bought" } : o)
-    }));
-    logAction("批次標記已採買", `${productName} · ${variantName} · ${ids.length} 筆`);
-    toast(`✅ 已標記 ${ids.length} 筆為已採買`);
+    for (const { order, idxes } of affectedOrders) {
+      const newItems = (order.items || []).map((it, i) =>
+        idxes.includes(i) ? { ...it, purchased: true, purchased_at: now } : it
+      );
+      purchasedItemCount += idxes.length;
+
+      // 判斷:訂單所有品項都採買完了嗎?
+      const allPurchased = newItems.every(it => it.purchased);
+      const newStatus = allPurchased ? "bought" : order.status;
+      const patch = { items: newItems, updated_at: now };
+      if (allPurchased) { patch.status = "bought"; statusChangedCount++; }
+
+      const { error } = await supabase.from("orders").update(patch).eq("id", order.id);
+      if (error) { toast(`訂單 #${order.no} 更新失敗:${error.message}`); continue; }
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems, status: newStatus } : x)
+      }));
+    }
+
+    logAction("採買品項", `${productName} · ${variantName} · ${purchasedItemCount} 件`);
+    toast(`✅ 已採買 ${purchasedItemCount} 件${statusChangedCount > 0 ? ` · ${statusChangedCount} 筆訂單完成` : ""}`);
   };
 
   // 批次標記已採買(用勾選的款式)
   const batchMarkBought = async () => {
     if (selected.size === 0) { toast("請先勾選要標記的款式"); return; }
 
-    // 找出所有勾選款式相關的訂單
-    const affectedOrderIds = new Set();
+    // 找出所有勾選款式對應的品項 (訂單 → 品項 idx 陣列)
+    const affectedOrders = [];
     data.orders.filter(o => o.status === "pending" && !o.archived).forEach(o => {
-      const hasMatch = (o.items || []).some(it => {
+      const idxes = [];
+      (o.items || []).forEach((it, i) => {
+        if (it.purchased) return;
         const parts = String(it.name).split(" / ");
         const p = parts[0] || it.name;
         const v = parts.slice(1).join(" / ") || "(單一款式)";
-        return selected.has(`${p}|||${v}`);
+        if (selected.has(`${p}|||${v}`)) idxes.push(i);
       });
-      if (hasMatch) affectedOrderIds.add(o.id);
+      if (idxes.length > 0) affectedOrders.push({ order: o, idxes });
     });
-    if (affectedOrderIds.size === 0) { toast("找不到相關訂單"); return; }
+    if (affectedOrders.length === 0) { toast("找不到相關品項"); return; }
 
-    if (!window.confirm(`已勾選 ${selected.size} 款,共 ${affectedOrderIds.size} 筆訂單,全部標記為「已採買」?`)) return;
+    if (!window.confirm(`已勾選 ${selected.size} 款,涉及 ${affectedOrders.length} 筆訂單,全部標記為「已採買」?\n\n若訂單所有品項都採買完,狀態會自動轉為「已採買」。`)) return;
 
+    let statusChangedCount = 0;
+    let purchasedItemCount = 0;
     const now = new Date().toISOString();
-    const ids = Array.from(affectedOrderIds);
-    const { error } = await supabase.from("orders")
-      .update({ status: "bought", updated_at: now })
-      .in("id", ids);
-    if (error) { toast(`更新失敗:${error.message}`); return; }
-    setData(d => ({
-      ...d,
-      orders: d.orders.map(o => ids.includes(o.id) ? { ...o, status: "bought" } : o)
-    }));
-    logAction("批次標記已採買", `${selected.size} 款 · ${ids.length} 筆`);
-    toast(`✅ 已標記 ${ids.length} 筆為已採買`);
+    for (const { order, idxes } of affectedOrders) {
+      const newItems = (order.items || []).map((it, i) =>
+        idxes.includes(i) ? { ...it, purchased: true, purchased_at: now } : it
+      );
+      purchasedItemCount += idxes.length;
+
+      const allPurchased = newItems.every(it => it.purchased);
+      const newStatus = allPurchased ? "bought" : order.status;
+      const patch = { items: newItems, updated_at: now };
+      if (allPurchased) { patch.status = "bought"; statusChangedCount++; }
+
+      const { error } = await supabase.from("orders").update(patch).eq("id", order.id);
+      if (error) { toast(`訂單 #${order.no} 更新失敗:${error.message}`); continue; }
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems, status: newStatus } : x)
+      }));
+    }
+
+    logAction("批次採買品項", `${selected.size} 款 · ${purchasedItemCount} 件`);
+    toast(`✅ 已採買 ${purchasedItemCount} 件${statusChangedCount > 0 ? ` · ${statusChangedCount} 筆訂單完成` : ""}`);
     setSelected(new Set());
   };
 
