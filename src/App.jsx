@@ -847,6 +847,69 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
   const updateStatus = async (id, status) => {
     const safeS = safeStatus(status);
     const o = data.orders.find(x => x.id === id);
+    if (!o) return;
+
+    // 特殊處理:已採買 → 待採買 = 還原採買/配貨紀錄,已配到的貨回庫存
+    if (o.status === "bought" && safeS === "pending") {
+      const stockedItems = (o.items || []).filter(it => it.stocked);
+      const returnCount = stockedItems.reduce((s, it) => s + (Number(it.qty) || 1), 0);
+
+      if (returnCount > 0) {
+        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),還原後將把這些貨還回庫存。確定?`)) return;
+      }
+
+      // 還原品項狀態
+      const now = new Date().toISOString();
+      const newItems = (o.items || []).map(it => {
+        if (!it.purchased && !it.stocked) return it;
+        const cleaned = { ...it };
+        delete cleaned.purchased;
+        delete cleaned.purchased_at;
+        delete cleaned.stocked;
+        delete cleaned.stocked_at;
+        return cleaned;
+      });
+
+      // 已配貨的貨還回庫存
+      for (const it of stockedItems) {
+        const parts = String(it.name).split(" / ");
+        const productName = parts[0] || it.name;
+        const variantName = parts.slice(1).join(" / ");
+        const displayName = variantName ? `${productName} / ${variantName}` : productName;
+        const qty = Number(it.qty) || 1;
+        try {
+          const { data: existing } = await supabase.from("in_stock")
+            .select("*").eq("name", displayName).maybeSingle();
+          if (existing) {
+            const newStock = (Number(existing.stock) || 0) + qty;
+            await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", existing.id);
+          } else {
+            await supabase.from("in_stock").insert([{
+              id: secureUid(), name: displayName, price: 0, stock: qty, image: "", status: "off", created_at: now,
+            }]);
+          }
+        } catch (e) { console.warn("庫存還原失敗:", e); }
+      }
+
+      // 更新訂單:狀態改回 pending + 清 items + 清 stocked 旗標
+      const { error } = await supabase.from("orders").update({
+        status: safeS, items: newItems, stocked: false, stocked_at: null, updated_at: now
+      }).eq("id", id);
+      if (error) { toast(`更新失敗:${error.message}`); return; }
+
+      // 重新拉庫存
+      const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === id ? { ...x, status: safeS, items: newItems, stocked: false } : x),
+        inStock: inStockRes.data || d.inStock,
+      }));
+      logAction("還原採買/配貨", `#${o.no} · 還回庫存 ${returnCount} 件`);
+      toast(`✅ 已還原${returnCount > 0 ? ` · ${returnCount} 件還回庫存` : ""}`);
+      return;
+    }
+
+    // 一般狀態更新
     const { error } = await supabase.from("orders").update({ status: safeS, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) { toast("更新失敗"); return; }
     setData(d => ({ ...d, orders: d.orders.map(o => o.id === id ? { ...o, status: safeS } : o) }));
@@ -2472,24 +2535,27 @@ function InboundPage({ data, setData, toast, setTab }) {
         }
       }
 
-      // 剩餘的入庫存
-      if (remaining > 0) {
-        const { data: existing } = await supabase.from("in_stock")
-          .select("*").eq("name", displayName).maybeSingle();
-        if (existing) {
+      // 每個入庫的款式都在 in_stock 建紀錄,方便業者追蹤採買紀錄
+      const { data: existing } = await supabase.from("in_stock")
+        .select("*").eq("name", displayName).maybeSingle();
+      if (existing) {
+        // 已存在 → 累加剩餘量(可能是 0)
+        if (remaining > 0) {
           const newStock = (Number(existing.stock) || 0) + remaining;
           await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", existing.id);
-        } else {
-          await supabase.from("in_stock").insert([{
-            id: secureUid(),
-            name: displayName,
-            price: 0,
-            stock: remaining,
-            image: "",
-            status: "off",
-            created_at: new Date().toISOString(),
-          }]);
+          stockCount += remaining;
         }
+      } else {
+        // 不存在 → 建立紀錄(stock = 剩餘,可能是 0)
+        await supabase.from("in_stock").insert([{
+          id: secureUid(),
+          name: displayName,
+          price: 0,
+          stock: remaining,
+          image: "",
+          status: "off",  // 預設下架,業者需手動上架
+          created_at: new Date().toISOString(),
+        }]);
         stockCount += remaining;
       }
       processedCount++;
@@ -3028,26 +3094,62 @@ function InStockPage({ data, setData, toast }) {
         <Btn sm onClick={() => setShowAdd(true)}>＋ 新增現貨</Btn>
       </div>
 
+      {data.inStock.length === 0 && (
+        <Card style={{ padding: "40px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
+          <div style={{ fontSize: 13, color: C.muted }}>還沒有現貨/庫存紀錄</div>
+        </Card>
+      )}
       {data.inStock.map(item => (
-        <div key={item.id} style={{ background:C.surface, border:`1.5px solid ${C.border}`, boxShadow:C.shadow }}>
-          <div style={{ padding:"13px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <div style={{ fontSize:24 }}>{item.image||"🎁"}</div>
-              <div>
-                <div style={{ fontWeight:700 }}>{item.name}</div>
-                <div style={{ fontSize:13, color:C.green, fontWeight:700 }}>{fmtMoney(item.price)}</div>
+        <div key={item.id} style={{ background:C.surface, border:`1.5px solid ${C.border}`, boxShadow:C.shadow, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding:"13px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap: 10 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12, flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize:24, flexShrink: 0 }}>{item.image?.startsWith("data:")||item.image?.startsWith("http")?<img src={item.image} style={{width:32,height:32,borderRadius:6,objectFit:"cover"}}/>:(item.image||"🎁")}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight:700, fontSize: 13 }}>{item.name}</div>
+                {item.price > 0 && <div style={{ fontSize:13, color:C.green, fontWeight:700 }}>{fmtMoney(item.price)}</div>}
                 {item.variants && item.variants.length > 0 && (
                   <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
                     {item.variants.map(v => (
-                      <span key={v.id} style={{ fontSize:10, color:C.muted, border:`1px solid ${C.border}`, padding:"1px 7px" }}>{v.name}</span>
+                      <span key={v.id} style={{ fontSize:10, color:C.muted, border:`1px solid ${C.border}`, padding:"1px 7px", borderRadius: 4 }}>{v.name}</span>
                     ))}
                   </div>
                 )}
               </div>
             </div>
-            <div style={{ display:"flex", gap:6 }}>
+            <div style={{ display:"flex", gap:6, flexShrink: 0 }}>
               <Btn sm variant="soft" onClick={() => setEditing(item)}>✏️</Btn>
               <button onClick={() => del(item.id)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:15 }}>🗑</button>
+            </div>
+          </div>
+          {/* 庫存快速編輯 */}
+          <div style={{ padding: "10px 14px", background: C.bgDeep, borderTop: `1px dashed ${C.borderLight}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>📦 庫存數量</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={async () => {
+                const newStock = Math.max(0, (Number(item.stock) || 0) - 1);
+                const { error } = await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", item.id);
+                if (error) { toast("更新失敗"); return; }
+                setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock } : x) }));
+              }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", cursor: "pointer", fontSize: 14, color: C.muted }}>−</button>
+              <input type="number" inputMode="numeric" value={Number(item.stock) || 0}
+                onChange={async e => {
+                  const newStock = Math.max(0, Number(e.target.value) || 0);
+                  setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock } : x) }));
+                }}
+                onBlur={async e => {
+                  const newStock = Math.max(0, Number(e.target.value) || 0);
+                  const { error } = await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", item.id);
+                  if (error) toast("儲存失敗");
+                }}
+                style={{ width: 56, textAlign: "center", padding: "5px 4px", border: `1.5px solid ${C.accent}30`, borderRadius: 6, fontSize: 15, fontWeight: 700, color: C.accentDark, background: "#fff" }}/>
+              <button onClick={async () => {
+                const newStock = (Number(item.stock) || 0) + 1;
+                const { error } = await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", item.id);
+                if (error) { toast("更新失敗"); return; }
+                setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock } : x) }));
+              }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", cursor: "pointer", fontSize: 14, color: C.accent }}>+</button>
+              <span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>件</span>
             </div>
           </div>
         </div>
