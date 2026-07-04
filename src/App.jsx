@@ -2225,7 +2225,6 @@ function PurchasePage({ data, setData, toast, setTab }) {
 
     if (!window.confirm(`此款式共出現在 ${affectedOrders.length} 筆訂單,全部標記為「已採買」?`)) return;
 
-    let statusChangedCount = 0;
     let purchasedItemCount = 0;
     const now = new Date().toISOString();
     for (const { order, idxes } of affectedOrders) {
@@ -2234,22 +2233,19 @@ function PurchasePage({ data, setData, toast, setTab }) {
       );
       purchasedItemCount += idxes.length;
 
-      // 判斷:訂單所有品項都採買完了嗎?
-      const allPurchased = newItems.every(it => it.purchased);
-      const newStatus = allPurchased ? "bought" : order.status;
+      // 品項採買不改訂單狀態(訂單狀態改為 bought 由入庫完成時決定)
       const patch = { items: newItems, updated_at: now };
-      if (allPurchased) { patch.status = "bought"; statusChangedCount++; }
 
       const { error } = await supabase.from("orders").update(patch).eq("id", order.id);
       if (error) { toast(`訂單 #${order.no} 更新失敗:${error.message}`); continue; }
       setData(d => ({
         ...d,
-        orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems, status: newStatus } : x)
+        orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems } : x)
       }));
     }
 
     logAction("採買品項", `${productName} · ${variantName} · ${purchasedItemCount} 件`);
-    toast(`✅ 已採買 ${purchasedItemCount} 件${statusChangedCount > 0 ? ` · ${statusChangedCount} 筆訂單完成` : ""}`);
+    toast(`✅ 已採買 ${purchasedItemCount} 件`);
   };
 
   // 批次標記已採買(用勾選的款式)
@@ -2271,9 +2267,8 @@ function PurchasePage({ data, setData, toast, setTab }) {
     });
     if (affectedOrders.length === 0) { toast("找不到相關品項"); return; }
 
-    if (!window.confirm(`已勾選 ${selected.size} 款,涉及 ${affectedOrders.length} 筆訂單,全部標記為「已採買」?\n\n若訂單所有品項都採買完,狀態會自動轉為「已採買」。`)) return;
+    if (!window.confirm(`已勾選 ${selected.size} 款,涉及 ${affectedOrders.length} 筆訂單,全部標記為「已採買」?`)) return;
 
-    let statusChangedCount = 0;
     let purchasedItemCount = 0;
     const now = new Date().toISOString();
     for (const { order, idxes } of affectedOrders) {
@@ -2282,21 +2277,19 @@ function PurchasePage({ data, setData, toast, setTab }) {
       );
       purchasedItemCount += idxes.length;
 
-      const allPurchased = newItems.every(it => it.purchased);
-      const newStatus = allPurchased ? "bought" : order.status;
+      // 品項採買不改訂單狀態
       const patch = { items: newItems, updated_at: now };
-      if (allPurchased) { patch.status = "bought"; statusChangedCount++; }
 
       const { error } = await supabase.from("orders").update(patch).eq("id", order.id);
       if (error) { toast(`訂單 #${order.no} 更新失敗:${error.message}`); continue; }
       setData(d => ({
         ...d,
-        orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems, status: newStatus } : x)
+        orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems } : x)
       }));
     }
 
     logAction("批次採買品項", `${selected.size} 款 · ${purchasedItemCount} 件`);
-    toast(`✅ 已採買 ${purchasedItemCount} 件${statusChangedCount > 0 ? ` · ${statusChangedCount} 筆訂單完成` : ""}`);
+    toast(`✅ 已採買 ${purchasedItemCount} 件`);
     setSelected(new Set());
   };
 
@@ -2493,10 +2486,12 @@ function InboundPage({ data, setData, toast, setTab }) {
       const newItems = (order.items || []).map((it, i) =>
         itemIdxes.has(i) ? { ...it, stocked: true, stocked_at: now } : it
       );
+      // 判斷:所有品項都 stocked=true → 訂單狀態升為「已採買 bought」
       const allStocked = newItems.every(it => it.stocked);
       const patch = { items: newItems, updated_at: now };
-      // 全部品項都 stocked 且訂單狀態還是 bought → 標記訂單 stocked
-      if (allStocked && order.status === "bought") {
+      if (allStocked && order.status === "pending") {
+        // 全部品項入庫完 → 升狀態為「已採買」
+        patch.status = "bought";
         patch.stocked = true;
         patch.stocked_at = now;
         allStockedCount++;
@@ -2507,6 +2502,7 @@ function InboundPage({ data, setData, toast, setTab }) {
         ...d,
         orders: d.orders.map(x => x.id === orderId ? {
           ...x, items: newItems,
+          ...(patch.status ? { status: patch.status } : {}),
           ...(patch.stocked ? { stocked: true, stocked_at: now } : {})
         } : x)
       }));
@@ -2517,7 +2513,7 @@ function InboundPage({ data, setData, toast, setTab }) {
     setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
 
     logAction("批次入庫", `${processedCount} 款 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
-    toast(`✅ 已入庫 ${processedCount} 款${stockCount > 0 ? ` · ${stockCount} 件庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單全數入庫` : ""}`);
+    toast(`✅ 已入庫 ${processedCount} 款${stockCount > 0 ? ` · ${stockCount} 件庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單已升級為「已採買」` : ""}`);
     setBought({});
   };
 
