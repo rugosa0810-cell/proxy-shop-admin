@@ -666,6 +666,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     { id: "inbound",   label: "入庫配貨",   icon: "package-import" },
     { id: "instock",   label: "現貨/庫存",  icon: "package" },
     { id: "wishlist",  label: "許願清單",   icon: "star" },
+    { id: "revenue",   label: "營收報表",   icon: "chart-bar" },
     { id: "archive",   label: "封存區",     icon: "archive" },
     { id: "auditlog",  label: "操作日誌",   icon: "shield" },
     { id: "settings",  label: "帳號設定",   icon: "settings" },
@@ -744,6 +745,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
         {tab === "purchase"      && <PurchasePage      data={data} setData={setData} toast={showToast} setTab={setTab} />}
         {tab === "inbound"       && <InboundPage       data={data} setData={setData} toast={showToast} setTab={setTab} />}
+        {tab === "revenue"       && <RevenuePage       data={data} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
         {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
@@ -2394,6 +2396,391 @@ function InboundPage({ data, setData, toast, setTab }) {
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+// 營收報表:全部歷史合計 + 時間篩選 + 趨勢圖 + 排行 + 匯出
+function RevenuePage({ data }) {
+  const [range, setRange] = useState("all"); // today / week / month / all / custom
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  // === 時間篩選 ===
+  const now = new Date();
+  const getStartOfToday = () => { const d=new Date(now); d.setHours(0,0,0,0); return d; };
+  const getStartOfWeek = () => { const d=getStartOfToday(); const day=d.getDay()||7; d.setDate(d.getDate()-day+1); return d; };
+  const getStartOfMonth = () => { const d=new Date(now.getFullYear(),now.getMonth(),1); return d; };
+
+  const inRange = (o) => {
+    if (!o.created_at) return range === "all";
+    const t = new Date(o.created_at).getTime();
+    if (range === "today")  return t >= getStartOfToday().getTime();
+    if (range === "week")   return t >= getStartOfWeek().getTime();
+    if (range === "month")  return t >= getStartOfMonth().getTime();
+    if (range === "custom") {
+      const s = customStart ? new Date(customStart).getTime() : -Infinity;
+      const e = customEnd ? new Date(customEnd+"T23:59:59").getTime() : Infinity;
+      return t >= s && t <= e;
+    }
+    return true; // all
+  };
+
+  const allOrders = (data.orders || []).filter(inRange);
+
+  // === 總體統計 ===
+  const totalRevenue = allOrders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+  const totalCost = allOrders.reduce((s, o) => {
+    const itemsCost = (o.items || []).reduce((ss, it) => ss + (Number(it.cost) || 0) * (Number(it.qty) || 1), 0);
+    return s + itemsCost;
+  }, 0);
+  const totalProfit = allOrders.reduce((s, o) => s + (Number(o.profit) || 0), 0);
+  const orderCount = allOrders.length;
+  const validOrderCount = allOrders.filter(o => o.status !== "cancelled").length;
+  const avgOrder = validOrderCount > 0 ? Math.round(totalRevenue / validOrderCount) : 0;
+
+  // === 訂單狀態統計 ===
+  const statusCount = {
+    pending_review: allOrders.filter(o => o.status === "pending_review").length,
+    pending:        allOrders.filter(o => o.status === "pending").length,
+    bought:         allOrders.filter(o => o.status === "bought").length,
+    arrived:        allOrders.filter(o => o.status === "arrived").length,
+    shipped:        allOrders.filter(o => o.status === "shipped").length,
+    cancelled:      allOrders.filter(o => o.status === "cancelled").length,
+  };
+
+  // === 付款狀態統計 ===
+  const depositReceived = allOrders.filter(o => o.deposit_paid).length;
+  const finalReceived = allOrders.filter(o => o.final_paid).length;
+  const totalDepositAmount = allOrders.reduce((s, o) => s + (o.deposit_paid ? (Number(o.deposit) || Number(o.deposit_amount) || 0) : 0), 0);
+
+  // === 商品銷量+利潤率排行 ===
+  const productSales = new Map();
+  allOrders.filter(o => o.status !== "cancelled").forEach(o => {
+    (o.items || []).forEach(it => {
+      const productName = String(it.name).split(" / ")[0] || it.name;
+      if (!productSales.has(productName)) productSales.set(productName, { count: 0, revenue: 0, cost: 0 });
+      const p = productSales.get(productName);
+      p.count += Number(it.qty) || 1;
+      p.revenue += (Number(it.price) || 0) * (Number(it.qty) || 1);
+      p.cost += (Number(it.cost) || 0) * (Number(it.qty) || 1);
+    });
+  });
+  const productList = Array.from(productSales.entries()).map(([name, s]) => ({
+    name, ...s,
+    profit: s.revenue - s.cost,
+    profitRate: s.revenue > 0 ? Math.round((s.revenue - s.cost) / s.revenue * 100) : 0
+  }));
+  const topByRevenue = [...productList].sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+  const topByProfitRate = [...productList].filter(p => p.revenue > 0).sort((a, b) => b.profitRate - a.profitRate).slice(0, 10);
+
+  // === 客人購買排行 ===
+  const customerSales = new Map();
+  allOrders.filter(o => o.status !== "cancelled").forEach(o => {
+    const key = o.customer_line_id || o.customerId || o.customer_name || "匿名";
+    const name = o.customer_name || o.customerName || "匿名";
+    if (!customerSales.has(key)) customerSales.set(key, { name, count: 0, revenue: 0 });
+    const c = customerSales.get(key);
+    c.count += 1;
+    c.revenue += Number(o.total) || 0;
+  });
+  const topCustomers = Array.from(customerSales.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+
+  // === 月度趨勢(近 12 個月) ===
+  const monthlyData = new Map();
+  (data.orders || []).filter(o => o.status !== "cancelled").forEach(o => {
+    if (!o.created_at) return;
+    const d = new Date(o.created_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    if (!monthlyData.has(key)) monthlyData.set(key, { month: key, revenue: 0, profit: 0, orders: 0 });
+    const m = monthlyData.get(key);
+    m.revenue += Number(o.total) || 0;
+    m.profit += Number(o.profit) || 0;
+    m.orders += 1;
+  });
+  const monthly12 = Array.from(monthlyData.values()).sort((a, b) => a.month.localeCompare(b.month)).slice(-12);
+  const maxMonthlyRev = Math.max(1, ...monthly12.map(m => m.revenue));
+
+  // === CSV 匯出 ===
+  const exportCSV = () => {
+    const rows = [
+      ["#訂單號", "日期", "客人", "狀態", "商品", "營收 NT$", "成本 NT$", "利潤 NT$", "已付訂金", "已付尾款"],
+    ];
+    allOrders.forEach(o => {
+      const date = o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : "";
+      const items = (o.items || []).map(it => `${it.name} ×${it.qty}`).join(" | ");
+      const cost = (o.items || []).reduce((s, it) => s + (Number(it.cost) || 0) * (Number(it.qty) || 1), 0);
+      const status = ORDER_STATUS[o.status]?.label || o.status;
+      rows.push([
+        "#" + (o.no || ""),
+        date,
+        o.customer_name || o.customerName || "",
+        status,
+        items,
+        Number(o.total) || 0,
+        cost,
+        Number(o.profit) || 0,
+        o.deposit_paid ? "是" : "否",
+        o.final_paid ? "是" : "否",
+      ]);
+    });
+    // 加合計列
+    rows.push([]);
+    rows.push(["合計", "", "", "", "", totalRevenue, totalCost, totalProfit, `${depositReceived} 筆`, `${finalReceived} 筆`]);
+
+    const csvContent = "\uFEFF" + rows.map(r => r.map(cell => {
+      const s = String(cell);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(",")).join("\n");
+
+    const rangeLabel = { today: "今日", week: "本週", month: "本月", all: "全部歷史", custom: `${customStart}_${customEnd}` }[range] || "報表";
+    const filename = `營收報表_${rangeLabel}_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const rangeLabels = { today: "今日", week: "本週", month: "本月", all: "全部歷史", custom: "自訂" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📊 營收報表</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{rangeLabels[range]} · 共 {orderCount} 筆訂單</div>
+        </div>
+        <button onClick={exportCSV}
+          style={{ background: C.green, color: "#fff", border: "none", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+          📥 匯出 CSV
+        </button>
+      </div>
+
+      {/* 時間範圍篩選 */}
+      <Card style={{ padding: "12px 14px" }}>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, letterSpacing: .5, fontWeight: 600 }}>📅 時間範圍</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[["today","今日"],["week","本週"],["month","本月"],["all","全部"],["custom","自訂"]].map(([v, l]) => (
+            <button key={v} onClick={() => setRange(v)}
+              style={{ padding: "6px 14px", borderRadius: 99, border: `1.5px solid ${range===v?C.accent:C.border}`, background: range===v?C.accent:"transparent", color: range===v?"#fff":C.textMid, fontSize: 12, fontWeight: range===v?600:400, cursor: "pointer" }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        {range === "custom" && (
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 130 }}>
+              <div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>起始日</div>
+              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+                style={{ width: "100%", padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}/>
+            </div>
+            <div style={{ flex: 1, minWidth: 130 }}>
+              <div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>結束日</div>
+              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+                style={{ width: "100%", padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}/>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* 三大指標 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        <Card style={{ padding: "16px", background: `linear-gradient(135deg, ${C.accentBg} 0%, ${C.surface} 100%)` }}>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 4, letterSpacing: .5 }}>💰 總營收</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.accentDark }}>{fmtMoney(totalRevenue)}</div>
+        </Card>
+        <Card style={{ padding: "16px", background: `linear-gradient(135deg, ${C.redBg} 0%, ${C.surface} 100%)` }}>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 4, letterSpacing: .5 }}>📦 總成本</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.red }}>{fmtMoney(totalCost)}</div>
+        </Card>
+        <Card style={{ padding: "16px", background: `linear-gradient(135deg, ${C.greenBg} 0%, ${C.surface} 100%)` }}>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 4, letterSpacing: .5 }}>✨ 總利潤</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.green }}>{fmtMoney(totalProfit)}</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>利潤率 {totalRevenue > 0 ? Math.round(totalProfit / totalRevenue * 100) : 0}%</div>
+        </Card>
+      </div>
+
+      {/* 訂單/客單價 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        <Card style={{ padding: "14px" }}>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>📝 有效訂單</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{validOrderCount}</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>總 {orderCount} 筆(不含取消)</div>
+        </Card>
+        <Card style={{ padding: "14px" }}>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>💵 客單價</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{fmtMoney(avgOrder)}</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>平均每筆訂單</div>
+        </Card>
+      </div>
+
+      {/* 月度趨勢圖 (橫向長條) */}
+      <Card style={{ padding: "16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark, marginBottom: 12 }}>📈 月度營收趨勢 (近 12 月)</div>
+        {monthly12.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px", fontSize: 12, color: C.muted }}>目前沒有訂單資料</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {monthly12.map((m, i) => {
+              const revPct = (m.revenue / maxMonthlyRev) * 100;
+              const profPct = maxMonthlyRev > 0 ? (m.profit / maxMonthlyRev) * 100 : 0;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 56, fontSize: 11, color: C.textMid, fontWeight: 500, flexShrink: 0 }}>{m.month}</div>
+                  <div style={{ flex: 1, position: "relative", height: 22, background: C.bgDeep, borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${revPct}%`, background: C.accentBg }}/>
+                    <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${profPct}%`, background: `${C.green}40` }}/>
+                    <div style={{ position: "absolute", top: 0, right: 6, height: "100%", display: "flex", alignItems: "center", fontSize: 10, color: C.text, fontWeight: 600 }}>
+                      {fmtMoney(m.revenue)}
+                    </div>
+                  </div>
+                  <div style={{ width: 40, fontSize: 10, color: C.muted, textAlign: "right", flexShrink: 0 }}>{m.orders} 筆</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 12, marginTop: 12, fontSize: 10, color: C.muted, justifyContent: "center" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 12, height: 12, background: C.accentBg, borderRadius: 2 }}/>營收
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 12, height: 12, background: `${C.green}40`, borderRadius: 2 }}/>利潤
+          </span>
+        </div>
+      </Card>
+
+      {/* 訂單狀態統計 */}
+      <Card style={{ padding: "16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark, marginBottom: 12 }}>📋 訂單狀態</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 8 }}>
+          {[
+            ["待審核", statusCount.pending_review, C.purple, C.purpleBg],
+            ["待採買", statusCount.pending,        C.accent, C.accentBg],
+            ["已採買", statusCount.bought,         C.pinkDark, C.pinkBg],
+            ["已到台", statusCount.arrived,        C.green, C.greenBg],
+            ["已寄出", statusCount.shipped,        C.textMid, C.bgDeep],
+            ["已取消", statusCount.cancelled,      C.red, C.redBg],
+          ].map(([label, n, color, bg]) => (
+            <div key={label} style={{ padding: "10px 8px", background: bg, borderRadius: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color }}>{n}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* 付款狀態 */}
+      <Card style={{ padding: "16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark, marginBottom: 12 }}>💳 付款狀態</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ padding: "12px", background: C.greenBg, borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 3 }}>✓ 已收訂金</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.green }}>{depositReceived} 筆</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>共 {fmtMoney(totalDepositAmount)}</div>
+          </div>
+          <div style={{ padding: "12px", background: C.accentBg, borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 3 }}>✓ 已收尾款</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>{finalReceived} 筆</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 商品銷量排行 */}
+      <Card style={{ padding: "16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark, marginBottom: 12 }}>🏆 商品營收排行 Top 10</div>
+        {topByRevenue.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px", fontSize: 12, color: C.muted }}>目前沒有銷售資料</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {topByRevenue.map((p, i) => {
+              const maxRev = topByRevenue[0].revenue;
+              const pct = maxRev > 0 ? (p.revenue / maxRev) * 100 : 0;
+              return (
+                <div key={i} style={{ padding: "10px 12px", background: C.bgDeep, borderRadius: 8, position: "relative", overflow: "hidden" }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${pct}%`, background: C.accentBg, opacity: .5, zIndex: 0 }}/>
+                  <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: C.faint, fontWeight: 600 }}>#{i+1}</div>
+                      <div style={{ fontSize: 13, color: C.text, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark }}>{fmtMoney(p.revenue)}</div>
+                      <div style={{ fontSize: 10, color: C.muted }}>{p.count} 件</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* 商品利潤率排行 */}
+      <Card style={{ padding: "16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark, marginBottom: 12 }}>🎯 商品利潤率排行 Top 10</div>
+        {topByProfitRate.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px", fontSize: 12, color: C.muted }}>目前沒有資料(需先填成本)</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {topByProfitRate.map((p, i) => (
+              <div key={i} style={{ padding: "10px 12px", background: C.bgDeep, borderRadius: 8, position: "relative", overflow: "hidden" }}>
+                <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${Math.max(0, Math.min(100, p.profitRate))}%`, background: `${C.green}30`, zIndex: 0 }}/>
+                <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: C.faint, fontWeight: 600 }}>#{i+1}</div>
+                    <div style={{ fontSize: 13, color: C.text, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: C.green }}>{p.profitRate}%</div>
+                    <div style={{ fontSize: 10, color: C.muted }}>賺 {fmtMoney(p.profit)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* 客人購買排行 */}
+      <Card style={{ padding: "16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.accentDark, marginBottom: 12 }}>👥 客人購買排行 Top 10</div>
+        {topCustomers.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px", fontSize: 12, color: C.muted }}>目前沒有客人資料</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {topCustomers.map((c, i) => {
+              const maxRev = topCustomers[0].revenue;
+              const pct = maxRev > 0 ? (c.revenue / maxRev) * 100 : 0;
+              return (
+                <div key={i} style={{ padding: "10px 12px", background: C.bgDeep, borderRadius: 8, position: "relative", overflow: "hidden" }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${pct}%`, background: C.pinkBg, opacity: .5, zIndex: 0 }}/>
+                  <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: C.faint, fontWeight: 600 }}>#{i+1}</div>
+                      <div style={{ fontSize: 13, color: C.text, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.pinkDark }}>{fmtMoney(c.revenue)}</div>
+                      <div style={{ fontSize: 10, color: C.muted }}>{c.count} 筆訂單</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <div style={{ fontSize: 10, color: C.faint, textAlign: "center", padding: "8px 0 40px" }}>
+        報表包含所有訂單(含未完成 · 不含取消) · 月度趨勢用全部歷史
+      </div>
     </div>
   );
 }
