@@ -2226,10 +2226,10 @@ function PurchasePage({ data, setData, toast, setTab }) {
   );
 }
 
-// 入庫配貨:列出「已採買」但尚未「已到台」的款式聚合,讓業者登記買到多少
+// 入庫配貨:列出「已採買」但尚未入庫的款式聚合,讓業者登記買到多少
 function InboundPage({ data, setData, toast, setTab }) {
-  // 從已採買(bought)訂單聚合
-  const boughtOrders = data.orders.filter(o => o.status === "bought" && !o.archived);
+  // 從已採買(bought)且尚未入庫(stocked !== true)的訂單聚合
+  const boughtOrders = data.orders.filter(o => o.status === "bought" && !o.archived && !o.stocked);
   const groups = new Map();
   boughtOrders.forEach(o => {
     (o.items || []).forEach(it => {
@@ -2251,21 +2251,30 @@ function InboundPage({ data, setData, toast, setTab }) {
 
   const doInboundAll = async () => {
     if (groupList.length === 0) { toast("沒有可入庫的款式"); return; }
-    if (!window.confirm(`確定入庫 ${groupList.length} 個款式?將把訂單狀態改為「已到台」,多餘的入庫存`)) return;
 
-    let orderCount = 0;
-    let stockCount = 0;
-    for (const g of groupList) {
+    // 過濾出「實際買到 > 0」的款式,數量 0 直接跳過
+    const activeGroups = groupList.filter(g => {
       const key = `${g.productName}|||${g.variantName}`;
-      const actualCount = Number(bought[key] ?? g.needed) || g.needed;
+      const actualCount = Number(bought[key] ?? g.needed);
+      return actualCount > 0;
+    });
+    const skippedCount = groupList.length - activeGroups.length;
 
-      // 更新訂單為已到台
-      const orderIds = g.orderRefs.map(r => r.orderId);
-      const { error: e1 } = await supabase.from("orders")
-        .update({ status: "arrived", updated_at: new Date().toISOString() })
-        .in("id", orderIds);
-      if (e1) { toast(`訂單更新失敗:${e1.message}`); continue; }
-      orderCount += orderIds.length;
+    if (activeGroups.length === 0) {
+      toast("所有款式都填 0,沒有可入庫的項目");
+      return;
+    }
+
+    const confirmMsg = skippedCount > 0
+      ? `確定入庫 ${activeGroups.length} 個款式?(${skippedCount} 個款式因數量 0 將跳過)\n多餘的會進庫存,訂單狀態需另外到訂單管理手動改為「已到台」`
+      : `確定入庫 ${activeGroups.length} 個款式?多餘的會進庫存,訂單狀態需另外到訂單管理手動改為「已到台」`;
+    if (!window.confirm(confirmMsg)) return;
+
+    let stockCount = 0;
+    let processedCount = 0;
+    for (const g of activeGroups) {
+      const key = `${g.productName}|||${g.variantName}`;
+      const actualCount = Number(bought[key] ?? g.needed);
 
       // 多的入庫存
       const extra = actualCount - g.needed;
@@ -2290,17 +2299,31 @@ function InboundPage({ data, setData, toast, setTab }) {
         }
         stockCount += extra;
       }
+      processedCount++;
     }
 
-    // 重新拉資料
-    const [ordersRes, inStockRes] = await Promise.all([
-      supabase.from("orders").select("*").order("created_at", { ascending: false }),
-      supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
-    ]);
-    setData(d => ({ ...d, orders: ordersRes.data || d.orders, inStock: inStockRes.data || d.inStock }));
+    // 只把「有入庫」的款式相關訂單標記為 stocked
+    const allOrderIds = new Set();
+    activeGroups.forEach(g => g.orderRefs.forEach(r => allOrderIds.add(r.orderId)));
+    if (allOrderIds.size > 0) {
+      const now = new Date().toISOString();
+      const { error: e } = await supabase.from("orders")
+        .update({ stocked: true, stocked_at: now })
+        .in("id", Array.from(allOrderIds));
+      if (e) {
+        // 沒 stocked 欄位就靜默,反正主要是入庫存
+        console.warn("orders.stocked 欄位可能不存在:", e.message);
+      } else {
+        setData(d => ({ ...d, orders: d.orders.map(o => allOrderIds.has(o.id) ? { ...o, stocked: true, stocked_at: now } : o) }));
+      }
+    }
 
-    logAction("批次入庫配貨", `${groupList.length} 款式 · ${orderCount} 筆訂單 · 入庫存 ${stockCount} 件`);
-    toast(`✅ 已配貨 ${orderCount} 筆訂單${stockCount > 0 ? ` · ${stockCount} 件入庫存` : ""}`);
+    // 重新拉現貨資料
+    const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+    setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
+
+    logAction("批次入庫", `${processedCount} 款式 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount} 款`:""}`);
+    toast(`✅ 已入庫 ${processedCount} 款式${stockCount > 0 ? ` · ${stockCount} 件入庫存` : ""}${skippedCount > 0 ? ` · 跳過 ${skippedCount} 款` : ""}`);
     setBought({});
   };
 
@@ -2348,7 +2371,9 @@ function InboundPage({ data, setData, toast, setTab }) {
                       style={{ width: "100%", padding: "5px 8px", fontSize: 16, fontWeight: 700, color: C.accentDark, border: `1.5px solid ${C.accent}`, borderRadius: 6, background: "#fff", boxSizing: "border-box" }}/>
                   </div>
                   <div style={{ flex: 1, textAlign: "right" }}>
-                    {extra > 0 ? (
+                    {Number(actual) === 0 ? (
+                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>⊘ 跳過</div>
+                    ) : extra > 0 ? (
                       <div style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>✨ +{extra} 入庫</div>
                     ) : extra < 0 ? (
                       <div style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>⚠️ 缺 {-extra}</div>
