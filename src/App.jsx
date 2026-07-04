@@ -2391,13 +2391,15 @@ function PurchasePage({ data, setData, toast, setTab }) {
   );
 }
 
-// 入庫配貨:列出「已採買」但尚未入庫的款式聚合,讓業者登記買到多少
+// 入庫配貨:列出「已採買」但尚未入庫的品項聚合,讓業者登記買到多少
 function InboundPage({ data, setData, toast, setTab }) {
-  // 從已採買(bought)且尚未入庫(stocked !== true)的訂單聚合
-  const boughtOrders = data.orders.filter(o => o.status === "bought" && !o.archived && !o.stocked);
+  // 從所有未封存/未取消訂單的 items 掃描:purchased=true 且 stocked !== true 的品項
+  const validOrders = data.orders.filter(o => !o.archived && o.status !== "cancelled");
   const groups = new Map();
-  boughtOrders.forEach(o => {
-    (o.items || []).forEach(it => {
+  validOrders.forEach(o => {
+    (o.items || []).forEach((it, itemIdx) => {
+      if (!it.purchased) return;   // 未採買不列
+      if (it.stocked) return;      // 已入庫不列
       const parts = String(it.name).split(" / ");
       const productName = parts[0] || it.name;
       const variantName = parts.slice(1).join(" / ") || "(單一款式)";
@@ -2405,7 +2407,13 @@ function InboundPage({ data, setData, toast, setTab }) {
       if (!groups.has(key)) groups.set(key, { productName, variantName, needed: 0, orderRefs: [] });
       const g = groups.get(key);
       g.needed += (Number(it.qty) || 1);
-      g.orderRefs.push({ orderId: o.id, orderNo: o.no, customer: o.customer_name || "未名", qty: Number(it.qty) || 1 });
+      g.orderRefs.push({
+        orderId: o.id,
+        orderNo: o.no,
+        customer: o.customer_name || "未名",
+        qty: Number(it.qty) || 1,
+        itemIdx,
+      });
     });
   });
   const groupList = Array.from(groups.values());
@@ -2467,28 +2475,49 @@ function InboundPage({ data, setData, toast, setTab }) {
       processedCount++;
     }
 
-    // 只把「有入庫」的款式相關訂單標記為 stocked
-    const allOrderIds = new Set();
-    activeGroups.forEach(g => g.orderRefs.forEach(r => allOrderIds.add(r.orderId)));
-    if (allOrderIds.size > 0) {
-      const now = new Date().toISOString();
-      const { error: e } = await supabase.from("orders")
-        .update({ stocked: true, stocked_at: now })
-        .in("id", Array.from(allOrderIds));
-      if (e) {
-        // 沒 stocked 欄位就靜默,反正主要是入庫存
-        console.warn("orders.stocked 欄位可能不存在:", e.message);
-      } else {
-        setData(d => ({ ...d, orders: d.orders.map(o => allOrderIds.has(o.id) ? { ...o, stocked: true, stocked_at: now } : o) }));
+    // 在品項層標記 stocked (不是訂單層)
+    // 收集:每筆訂單要更新的品項 idx
+    const orderPatches = new Map(); // orderId → { itemIdxes: Set }
+    activeGroups.forEach(g => {
+      g.orderRefs.forEach(r => {
+        if (!orderPatches.has(r.orderId)) orderPatches.set(r.orderId, new Set());
+        orderPatches.get(r.orderId).add(r.itemIdx);
+      });
+    });
+
+    const now = new Date().toISOString();
+    let allStockedCount = 0;   // 全部品項都入庫完的訂單數
+    for (const [orderId, itemIdxes] of orderPatches.entries()) {
+      const order = data.orders.find(o => o.id === orderId);
+      if (!order) continue;
+      const newItems = (order.items || []).map((it, i) =>
+        itemIdxes.has(i) ? { ...it, stocked: true, stocked_at: now } : it
+      );
+      const allStocked = newItems.every(it => it.stocked);
+      const patch = { items: newItems, updated_at: now };
+      // 全部品項都 stocked 且訂單狀態還是 bought → 標記訂單 stocked
+      if (allStocked && order.status === "bought") {
+        patch.stocked = true;
+        patch.stocked_at = now;
+        allStockedCount++;
       }
+      const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
+      if (error) { console.warn(`訂單 #${order.no} 標記失敗:`, error.message); continue; }
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === orderId ? {
+          ...x, items: newItems,
+          ...(patch.stocked ? { stocked: true, stocked_at: now } : {})
+        } : x)
+      }));
     }
 
     // 重新拉現貨資料
     const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
     setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
 
-    logAction("批次入庫", `${processedCount} 款式 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount} 款`:""}`);
-    toast(`✅ 已入庫 ${processedCount} 款式${stockCount > 0 ? ` · ${stockCount} 件入庫存` : ""}${skippedCount > 0 ? ` · 跳過 ${skippedCount} 款` : ""}`);
+    logAction("批次入庫", `${processedCount} 款 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
+    toast(`✅ 已入庫 ${processedCount} 款${stockCount > 0 ? ` · ${stockCount} 件庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單全數入庫` : ""}`);
     setBought({});
   };
 
