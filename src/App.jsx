@@ -2533,11 +2533,14 @@ function InboundPage({ data, setData, toast, setTab }) {
         }
       }
 
-      // in_stock 記錄兩個數字 (加錯誤處理讓失敗會提示)
+      // in_stock 記錄兩個數字 (加錯誤處理讓失敗直接告訴業者)
       try {
         const { data: existing, error: selErr } = await supabase.from("in_stock")
           .select("*").eq("name", displayName).maybeSingle();
-        if (selErr) console.error("in_stock 查詢失敗:", selErr);
+        if (selErr) {
+          console.error("in_stock 查詢失敗:", selErr);
+          alert(`⚠️ in_stock 查詢失敗:\n${selErr.message}`);
+        }
 
         if (existing) {
           const newTotal = (Number(existing.total_purchased) || 0) + actualBought;
@@ -2549,16 +2552,18 @@ function InboundPage({ data, setData, toast, setTab }) {
           }).eq("id", existing.id);
           if (updErr) {
             console.error("in_stock 更新失敗:", updErr);
-            // fallback:沒 total_purchased 欄位就拿掉
             if (updErr.message && /total_purchased/.test(updErr.message)) {
-              await supabase.from("in_stock").update({
+              const retry = await supabase.from("in_stock").update({
                 stock: newStock, updated_at: new Date().toISOString()
               }).eq("id", existing.id);
-              console.warn("total_purchased 欄位不存在,僅更新 stock");
+              if (retry.error) alert(`⚠️ in_stock 更新失敗:\n${retry.error.message}`);
+              else console.warn("total_purchased 欄位不存在,僅更新 stock");
+            } else {
+              alert(`⚠️ in_stock 更新失敗:\n${updErr.message}`);
             }
           }
         } else {
-          const { error: insErr } = await supabase.from("in_stock").insert([{
+          const newItem = {
             id: secureUid(),
             name: displayName,
             price: 0,
@@ -2567,21 +2572,29 @@ function InboundPage({ data, setData, toast, setTab }) {
             image: "",
             status: "off",
             created_at: new Date().toISOString(),
-          }]);
+          };
+          console.log("嘗試建立 in_stock:", newItem);
+          const { error: insErr, data: insData } = await supabase.from("in_stock").insert([newItem]).select();
           if (insErr) {
             console.error("in_stock 建立失敗:", insErr);
             // fallback:沒 total_purchased 欄位就拿掉
             if (insErr.message && /total_purchased/.test(insErr.message)) {
-              await supabase.from("in_stock").insert([{
+              const retry = await supabase.from("in_stock").insert([{
                 id: secureUid(), name: displayName, price: 0, stock: remaining,
                 image: "", status: "off", created_at: new Date().toISOString(),
-              }]);
-              console.warn("total_purchased 欄位不存在,僅存 stock");
+              }]).select();
+              if (retry.error) alert(`⚠️ in_stock 建立失敗:\n${retry.error.message}`);
+              else console.warn("total_purchased 欄位不存在,僅存 stock");
+            } else {
+              alert(`⚠️ in_stock 建立失敗:\n${insErr.message}\n\n可能原因:\n1. in_stock 表 RLS 阻擋 insert\n2. 欄位型別不符\n3. 必填欄位缺失`);
             }
+          } else {
+            console.log("✅ in_stock 建立成功:", insData);
           }
         }
       } catch (e) {
         console.error("in_stock 例外:", e);
+        alert(`⚠️ in_stock 例外:\n${e.message || e}`);
       }
       stockCount += remaining;
       processedCount++;
