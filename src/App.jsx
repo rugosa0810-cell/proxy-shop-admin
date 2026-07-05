@@ -909,6 +909,48 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
       return;
     }
 
+    // 特殊處理:任何狀態 → 已寄出 = 把已配貨品項數量從 in_stock.total_purchased 扣掉
+    if (safeS === "shipped" && o.status !== "shipped") {
+      const stockedItems = (o.items || []).filter(it => it.stocked);
+      // 依款式聚合 qty
+      const groupByName = new Map();
+      for (const it of stockedItems) {
+        const parts = String(it.name).split(" / ");
+        const productName = parts[0] || it.name;
+        const variantName = parts.slice(1).join(" / ");
+        const displayName = variantName ? `${productName} / ${variantName}` : productName;
+        groupByName.set(displayName, (groupByName.get(displayName) || 0) + (Number(it.qty) || 1));
+      }
+      // 從 in_stock 扣掉 total_purchased
+      for (const [displayName, qty] of groupByName.entries()) {
+        try {
+          const { data: existing } = await supabase.from("in_stock")
+            .select("*").eq("name", displayName).maybeSingle();
+          if (existing) {
+            const newTotal = Math.max(0, (Number(existing.total_purchased) || 0) - qty);
+            await supabase.from("in_stock").update({
+              total_purchased: newTotal,
+              updated_at: new Date().toISOString()
+            }).eq("id", existing.id);
+          }
+        } catch (e) { console.warn("扣總進貨失敗:", e); }
+      }
+      // 更新訂單狀態
+      const { error } = await supabase.from("orders").update({ status: safeS, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) { toast("更新失敗"); return; }
+      // 重新拉 in_stock
+      const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === id ? { ...x, status: safeS } : x),
+        inStock: inStockRes.data || d.inStock,
+      }));
+      const totalDeducted = Array.from(groupByName.values()).reduce((a, b) => a + b, 0);
+      logAction("訂單已寄出", `#${o.no} · 扣總進貨 ${totalDeducted} 件`);
+      toast(`✅ 已寄出${totalDeducted > 0 ? ` · 從總進貨扣除 ${totalDeducted} 件` : ""}`);
+      return;
+    }
+
     // 一般狀態更新
     const { error } = await supabase.from("orders").update({ status: safeS, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) { toast("更新失敗"); return; }
@@ -3270,8 +3312,33 @@ function InStockPage({ data, setData, toast }) {
           {/* 庫存快速編輯 */}
           <div style={{ padding: "10px 14px", background: C.bgDeep, borderTop: `1px dashed ${C.borderLight}` }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-              <div style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>📊 總進貨</div>
-              <div style={{ fontSize: 13, color: C.textMid, fontWeight: 700 }}>{Number(item.total_purchased) || 0} 件</div>
+              <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>📊 總進貨</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={async () => {
+                  const newTotal = Math.max(0, (Number(item.total_purchased) || 0) - 1);
+                  const { error } = await supabase.from("in_stock").update({ total_purchased: newTotal, updated_at: new Date().toISOString() }).eq("id", item.id);
+                  if (error) { toast("更新失敗"); return; }
+                  setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, total_purchased: newTotal } : x) }));
+                }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", cursor: "pointer", fontSize: 14, color: C.muted }}>−</button>
+                <input type="number" inputMode="numeric" value={Number(item.total_purchased) || 0}
+                  onChange={e => {
+                    const newTotal = Math.max(0, Number(e.target.value) || 0);
+                    setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, total_purchased: newTotal } : x) }));
+                  }}
+                  onBlur={async e => {
+                    const newTotal = Math.max(0, Number(e.target.value) || 0);
+                    const { error } = await supabase.from("in_stock").update({ total_purchased: newTotal, updated_at: new Date().toISOString() }).eq("id", item.id);
+                    if (error) toast("儲存失敗");
+                  }}
+                  style={{ width: 56, textAlign: "center", padding: "5px 4px", border: `1.5px solid ${C.textMid}30`, borderRadius: 6, fontSize: 14, fontWeight: 700, color: C.textMid, background: "#fff" }}/>
+                <button onClick={async () => {
+                  const newTotal = (Number(item.total_purchased) || 0) + 1;
+                  const { error } = await supabase.from("in_stock").update({ total_purchased: newTotal, updated_at: new Date().toISOString() }).eq("id", item.id);
+                  if (error) { toast("更新失敗"); return; }
+                  setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, total_purchased: newTotal } : x) }));
+                }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", cursor: "pointer", fontSize: 14, color: C.textMid }}>+</button>
+                <span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>件</span>
+              </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>📦 剩餘庫存</div>
