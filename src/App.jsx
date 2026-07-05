@@ -2497,8 +2497,8 @@ function InboundPage({ data, setData, toast, setTab }) {
     }
 
     const confirmMsg = skippedCount > 0
-      ? `確定入庫 ${activeGroups.length} 個款式?(${skippedCount} 個因數量 0 跳過)\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。多餘的入庫存。`
-      : `確定入庫 ${activeGroups.length} 個款式?\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。多餘的入庫存。`;
+      ? `確定入庫 ${activeGroups.length} 個款式?(${skippedCount} 個因數量 0 跳過)\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。\n實際買到的總量會全部記入現貨/庫存,方便追蹤採買紀錄。`
+      : `確定入庫 ${activeGroups.length} 個款式?\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。\n實際買到的總量會全部記入現貨/庫存,方便追蹤採買紀錄。`;
     if (!window.confirm(confirmMsg)) return;
 
     let stockCount = 0;
@@ -2515,49 +2515,50 @@ function InboundPage({ data, setData, toast, setTab }) {
 
     for (const g of activeGroups) {
       const key = `${g.productName}|||${g.variantName}`;
-      let remaining = Number(bought[key] ?? g.needed);   // 實際買到多少
+      const actualBought = Number(bought[key] ?? g.needed);   // 實際買到多少(全部)
+      let remaining = actualBought;   // 這個變數只用來配貨判斷
       const displayName = `${g.productName}${g.variantName !== "(單一款式)" ? ` / ${g.variantName}` : ""}`;
 
       // 按 orderRefs 順序配貨(先來後到 → 訂單越早的優先)
-      // 排序:用 orderNo 或 orderId 做穩定排序
       const sortedRefs = [...g.orderRefs].sort((a, b) => String(a.orderNo).localeCompare(String(b.orderNo)));
 
       for (const r of sortedRefs) {
         const need = Number(r.qty) || 1;
         if (remaining >= need) {
-          // 有貨滿足這筆訂單的這個品項 → 標記 stocked
           markStocked(r.orderId, r.itemIdx);
           remaining -= need;
           allocatedItemCount++;
         } else {
-          // 貨不夠給這筆 → 這個品項留在配貨清單(不動)
           unallocatedItemCount++;
         }
       }
 
-      // 每個入庫的款式都在 in_stock 建紀錄,方便業者追蹤採買紀錄
+      // in_stock 記錄兩個數字:
+      // - total_purchased: 累計進貨量 (加 actualBought,永遠只加不減)
+      // - stock: 目前剩餘可賣量 (加 remaining,配掉的不算)
       const { data: existing } = await supabase.from("in_stock")
         .select("*").eq("name", displayName).maybeSingle();
       if (existing) {
-        // 已存在 → 累加剩餘量(可能是 0)
-        if (remaining > 0) {
-          const newStock = (Number(existing.stock) || 0) + remaining;
-          await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", existing.id);
-          stockCount += remaining;
-        }
+        const newTotal = (Number(existing.total_purchased) || 0) + actualBought;
+        const newStock = (Number(existing.stock) || 0) + remaining;
+        await supabase.from("in_stock").update({
+          total_purchased: newTotal,
+          stock: newStock,
+          updated_at: new Date().toISOString()
+        }).eq("id", existing.id);
       } else {
-        // 不存在 → 建立紀錄(stock = 剩餘,可能是 0)
         await supabase.from("in_stock").insert([{
           id: secureUid(),
           name: displayName,
           price: 0,
           stock: remaining,
+          total_purchased: actualBought,
           image: "",
-          status: "off",  // 預設下架,業者需手動上架
+          status: "off",
           created_at: new Date().toISOString(),
         }]);
-        stockCount += remaining;
       }
+      stockCount += remaining;
       processedCount++;
     }
 
@@ -2599,7 +2600,7 @@ function InboundPage({ data, setData, toast, setTab }) {
     setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
 
     logAction("批次入庫", `${processedCount} 款 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
-    toast(`✅ 已配貨 ${allocatedItemCount} 件${stockCount > 0 ? ` · ${stockCount} 件庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單完成` : ""}${unallocatedItemCount > 0 ? ` · ⚠️ ${unallocatedItemCount} 件缺量待補` : ""}`);
+    toast(`✅ 已配貨 ${allocatedItemCount} 件${stockCount > 0 ? ` · ${stockCount} 件記入庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單完成` : ""}${unallocatedItemCount > 0 ? ` · ⚠️ ${unallocatedItemCount} 件缺量待補` : ""}`);
     setBought({});
   };
 
@@ -3087,6 +3088,95 @@ function InStockPage({ data, setData, toast }) {
     setEditing(null);
   };
 
+  // 進貨:填數量 → 系統自動配貨到待配貨訂單,剩餘進庫存
+  const restock = async (item) => {
+    const input = window.prompt(`「${item.name}」這次採買數量?\n\n系統會自動配給待配貨的訂單(已採買但未配貨),剩餘進庫存。`, "");
+    if (input === null) return;
+    const qty = Math.max(0, Math.floor(Number(input) || 0));
+    if (qty <= 0) { toast("請輸入 > 0 的數量"); return; }
+
+    let remaining = qty;
+    let allocatedCount = 0;
+    let completedOrders = 0;
+
+    // 找出這款式所有 purchased=true 且 stocked !== true 的品項(依訂單先來後到)
+    const targetRefs = [];
+    (data.orders || []).filter(o => !o.archived && o.status !== "cancelled").forEach(o => {
+      (o.items || []).forEach((it, idx) => {
+        if (!it.purchased || it.stocked) return;
+        const parts = String(it.name).split(" / ");
+        const displayName = parts.slice(1).join(" / ")
+          ? `${parts[0]} / ${parts.slice(1).join(" / ")}`
+          : parts[0];
+        if (displayName === item.name) {
+          targetRefs.push({ order: o, itemIdx: idx, qty: Number(it.qty) || 1 });
+        }
+      });
+    });
+    targetRefs.sort((a, b) => String(a.order.no).localeCompare(String(b.order.no)));
+
+    // 配貨
+    const now = new Date().toISOString();
+    const orderPatches = new Map(); // orderId → itemIdxes
+    for (const r of targetRefs) {
+      if (remaining >= r.qty) {
+        if (!orderPatches.has(r.order.id)) orderPatches.set(r.order.id, new Set());
+        orderPatches.get(r.order.id).add(r.itemIdx);
+        remaining -= r.qty;
+        allocatedCount += r.qty;
+      }
+    }
+
+    // 更新訂單品項 stocked
+    for (const [orderId, idxes] of orderPatches.entries()) {
+      const order = data.orders.find(o => o.id === orderId);
+      if (!order) continue;
+      const newItems = (order.items || []).map((it, i) =>
+        idxes.has(i) ? { ...it, stocked: true, stocked_at: now } : it
+      );
+      const allStocked = newItems.every(it => it.stocked);
+      const patch = { items: newItems, updated_at: now };
+      if (allStocked && order.status === "pending") {
+        patch.status = "bought";
+        patch.stocked = true;
+        patch.stocked_at = now;
+        completedOrders++;
+      }
+      const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
+      if (error) { console.warn("訂單更新失敗:", error); continue; }
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === orderId ? {
+          ...x, items: newItems,
+          ...(patch.status ? { status: patch.status } : {}),
+          ...(patch.stocked ? { stocked: true, stocked_at: now } : {})
+        } : x)
+      }));
+    }
+
+    // 剩餘進庫存 + 更新總進貨量 (即使 remaining=0 也要更新總進貨)
+    const newStock = (Number(item.stock) || 0) + remaining;
+    const newTotal = (Number(item.total_purchased) || 0) + qty;
+    await supabase.from("in_stock").update({
+      stock: newStock,
+      total_purchased: newTotal,
+      updated_at: now
+    }).eq("id", item.id);
+    setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock, total_purchased: newTotal } : x) }));
+
+    logAction("進貨", `${item.name} · 採買 ${qty} 件 · 配貨 ${allocatedCount} · 入庫 ${remaining}`);
+    toast(`✅ 進貨 ${qty} 件 · 配貨 ${allocatedCount}${completedOrders > 0 ? ` · ${completedOrders} 筆訂單完成`: ""}${remaining > 0 ? ` · ${remaining} 件入庫` : ""}`);
+  };
+
+  // 上下架切換
+  const toggleStatus = async (item) => {
+    const newStatus = item.status === "on" ? "off" : "on";
+    const { error } = await supabase.from("in_stock").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("id", item.id);
+    if (error) { toast("更新失敗"); return; }
+    setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, status: newStatus } : x) }));
+    toast(newStatus === "on" ? "✅ 已上架轉現貨販售" : "已下架");
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -3106,8 +3196,13 @@ function InStockPage({ data, setData, toast }) {
             <div style={{ display:"flex", alignItems:"center", gap:12, flex: 1, minWidth: 0 }}>
               <div style={{ fontSize:24, flexShrink: 0 }}>{item.image?.startsWith("data:")||item.image?.startsWith("http")?<img src={item.image} style={{width:32,height:32,borderRadius:6,objectFit:"cover"}}/>:(item.image||"🎁")}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight:700, fontSize: 13 }}>{item.name}</div>
-                {item.price > 0 && <div style={{ fontSize:13, color:C.green, fontWeight:700 }}>{fmtMoney(item.price)}</div>}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight:700, fontSize: 13 }}>{item.name}</div>
+                  {item.status === "on"
+                    ? <span style={{ fontSize:9, background:C.green, color:"#fff", padding:"1px 6px", borderRadius:4, fontWeight:600 }}>✓ 現貨販售中</span>
+                    : <span style={{ fontSize:9, background:C.faint, color:"#fff", padding:"1px 6px", borderRadius:4, fontWeight:600 }}>後台專用</span>}
+                </div>
+                {item.price > 0 && <div style={{ fontSize:13, color:C.green, fontWeight:700, marginTop: 2 }}>{fmtMoney(item.price)}</div>}
                 {item.variants && item.variants.length > 0 && (
                   <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
                     {item.variants.map(v => (
@@ -3123,9 +3218,14 @@ function InStockPage({ data, setData, toast }) {
             </div>
           </div>
           {/* 庫存快速編輯 */}
-          <div style={{ padding: "10px 14px", background: C.bgDeep, borderTop: `1px dashed ${C.borderLight}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>📦 庫存數量</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ padding: "10px 14px", background: C.bgDeep, borderTop: `1px dashed ${C.borderLight}` }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>📊 總進貨</div>
+              <div style={{ fontSize: 13, color: C.textMid, fontWeight: 700 }}>{Number(item.total_purchased) || 0} 件</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>📦 剩餘庫存</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <button onClick={async () => {
                 const newStock = Math.max(0, (Number(item.stock) || 0) - 1);
                 const { error } = await supabase.from("in_stock").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", item.id);
@@ -3133,7 +3233,7 @@ function InStockPage({ data, setData, toast }) {
                 setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock } : x) }));
               }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", cursor: "pointer", fontSize: 14, color: C.muted }}>−</button>
               <input type="number" inputMode="numeric" value={Number(item.stock) || 0}
-                onChange={async e => {
+                onChange={e => {
                   const newStock = Math.max(0, Number(e.target.value) || 0);
                   setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock } : x) }));
                 }}
@@ -3151,6 +3251,18 @@ function InStockPage({ data, setData, toast }) {
               }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", cursor: "pointer", fontSize: 14, color: C.accent }}>+</button>
               <span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>件</span>
             </div>
+            </div>
+          </div>
+          {/* 操作區:進貨 + 上下架 */}
+          <div style={{ display: "flex", gap: 6, padding: "10px 14px", background: "#fff", borderTop: `1px solid ${C.borderLight}` }}>
+            <button onClick={() => restock(item)}
+              style={{ flex: 1, background: C.accentBg, color: C.accentDark, border: `1.5px solid ${C.accent}`, padding: "9px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              📥 + 進貨 (自動配貨)
+            </button>
+            <button onClick={() => toggleStatus(item)}
+              style={{ flex: 1, background: item.status === "on" ? C.pinkBg : C.greenBg, color: item.status === "on" ? C.pinkDark : C.green, border: `1.5px solid ${item.status === "on" ? C.pinkDark : C.green}`, padding: "9px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              {item.status === "on" ? "🔒 下架" : "🛒 轉現貨販售"}
+            </button>
           </div>
         </div>
       ))}
