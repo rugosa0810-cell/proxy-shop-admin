@@ -512,7 +512,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         wishlist:      w.data || [],
         members:       m.data || [],
       }));
-      console.log(`📊 已載入: 訂單 ${(o.data||[]).length}, 商品 ${(p.data||[]).length}, 會員 ${(m.data||[]).length}, 許願 ${(w.data||[]).length}`);
+      console.log(`📊 已載入: 訂單 ${(o.data||[]).length}, 商品 ${(p.data||[]).length}, 現貨 ${(s.data||[]).length}, 會員 ${(m.data||[]).length}, 許願 ${(w.data||[]).length}`);
     }).catch(err => console.error("Supabase 載入失敗", err));
   }, []);
 
@@ -2533,30 +2533,55 @@ function InboundPage({ data, setData, toast, setTab }) {
         }
       }
 
-      // in_stock 記錄兩個數字:
-      // - total_purchased: 累計進貨量 (加 actualBought,永遠只加不減)
-      // - stock: 目前剩餘可賣量 (加 remaining,配掉的不算)
-      const { data: existing } = await supabase.from("in_stock")
-        .select("*").eq("name", displayName).maybeSingle();
-      if (existing) {
-        const newTotal = (Number(existing.total_purchased) || 0) + actualBought;
-        const newStock = (Number(existing.stock) || 0) + remaining;
-        await supabase.from("in_stock").update({
-          total_purchased: newTotal,
-          stock: newStock,
-          updated_at: new Date().toISOString()
-        }).eq("id", existing.id);
-      } else {
-        await supabase.from("in_stock").insert([{
-          id: secureUid(),
-          name: displayName,
-          price: 0,
-          stock: remaining,
-          total_purchased: actualBought,
-          image: "",
-          status: "off",
-          created_at: new Date().toISOString(),
-        }]);
+      // in_stock 記錄兩個數字 (加錯誤處理讓失敗會提示)
+      try {
+        const { data: existing, error: selErr } = await supabase.from("in_stock")
+          .select("*").eq("name", displayName).maybeSingle();
+        if (selErr) console.error("in_stock 查詢失敗:", selErr);
+
+        if (existing) {
+          const newTotal = (Number(existing.total_purchased) || 0) + actualBought;
+          const newStock = (Number(existing.stock) || 0) + remaining;
+          const { error: updErr } = await supabase.from("in_stock").update({
+            total_purchased: newTotal,
+            stock: newStock,
+            updated_at: new Date().toISOString()
+          }).eq("id", existing.id);
+          if (updErr) {
+            console.error("in_stock 更新失敗:", updErr);
+            // fallback:沒 total_purchased 欄位就拿掉
+            if (updErr.message && /total_purchased/.test(updErr.message)) {
+              await supabase.from("in_stock").update({
+                stock: newStock, updated_at: new Date().toISOString()
+              }).eq("id", existing.id);
+              console.warn("total_purchased 欄位不存在,僅更新 stock");
+            }
+          }
+        } else {
+          const { error: insErr } = await supabase.from("in_stock").insert([{
+            id: secureUid(),
+            name: displayName,
+            price: 0,
+            stock: remaining,
+            total_purchased: actualBought,
+            image: "",
+            status: "off",
+            created_at: new Date().toISOString(),
+          }]);
+          if (insErr) {
+            console.error("in_stock 建立失敗:", insErr);
+            // fallback:沒 total_purchased 欄位就拿掉
+            if (insErr.message && /total_purchased/.test(insErr.message)) {
+              await supabase.from("in_stock").insert([{
+                id: secureUid(), name: displayName, price: 0, stock: remaining,
+                image: "", status: "off", created_at: new Date().toISOString(),
+              }]);
+              console.warn("total_purchased 欄位不存在,僅存 stock");
+            }
+          }
+        }
+      } catch (e) {
+        console.error("in_stock 例外:", e);
       }
       stockCount += remaining;
       processedCount++;
@@ -2583,8 +2608,19 @@ function InboundPage({ data, setData, toast, setTab }) {
         patch.stocked_at = now;
         allStockedCount++;
       }
-      const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
-      if (error) { console.warn(`訂單 #${order.no} 標記失敗:`, error.message); continue; }
+      let { error } = await supabase.from("orders").update(patch).eq("id", orderId);
+      if (error) {
+        console.warn(`訂單 #${order.no} 更新失敗:`, error.message);
+        // fallback:沒 stocked 欄位就拿掉再試
+        if (error.message && /stocked/.test(error.message)) {
+          const { stocked, stocked_at, ...patchNoStocked } = patch;
+          const retry = await supabase.from("orders").update(patchNoStocked).eq("id", orderId);
+          if (retry.error) { console.warn("retry 也失敗:", retry.error); continue; }
+          console.warn("orders 沒 stocked 欄位,已改用不含 stocked 的 patch");
+        } else {
+          continue;
+        }
+      }
       setData(d => ({
         ...d,
         orders: d.orders.map(x => x.id === orderId ? {
@@ -3184,13 +3220,14 @@ function InStockPage({ data, setData, toast }) {
         <Btn sm onClick={() => setShowAdd(true)}>＋ 新增現貨</Btn>
       </div>
 
-      {data.inStock.length === 0 && (
+      {(!data.inStock || data.inStock.length === 0) && (
         <Card style={{ padding: "40px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
           <div style={{ fontSize: 13, color: C.muted }}>還沒有現貨/庫存紀錄</div>
+          <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>入庫配貨完成後會自動出現,或按上方「+ 新增現貨」手動新增</div>
         </Card>
       )}
-      {data.inStock.map(item => (
+      {(data.inStock || []).map(item => (
         <div key={item.id} style={{ background:C.surface, border:`1.5px solid ${C.border}`, boxShadow:C.shadow, borderRadius: 12, overflow: "hidden" }}>
           <div style={{ padding:"13px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap: 10 }}>
             <div style={{ display:"flex", alignItems:"center", gap:12, flex: 1, minWidth: 0 }}>
