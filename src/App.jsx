@@ -849,13 +849,13 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
     const o = data.orders.find(x => x.id === id);
     if (!o) return;
 
-    // 特殊處理:已採買 → 待採買 = 還原採買/配貨紀錄,已配到的貨回庫存
+    // 特殊處理:已採買 → 待採買 = 還原採買/配貨紀錄(貨還在手上,不動庫存)
     if (o.status === "bought" && safeS === "pending") {
       const stockedItems = (o.items || []).filter(it => it.stocked);
       const returnCount = stockedItems.reduce((s, it) => s + (Number(it.qty) || 1), 0);
 
       if (returnCount > 0) {
-        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),還原後將把這些貨還回庫存。確定?`)) return;
+        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),還原後品項標籤會清除,可重新採買/配貨(貨還在手上,庫存不動)。確定?`)) return;
       }
 
       // 還原品項狀態
@@ -870,46 +870,22 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         return cleaned;
       });
 
-      // 已配貨的貨還回庫存
-      for (const it of stockedItems) {
-        const parts = String(it.name).split(" / ");
-        const productName = parts[0] || it.name;
-        const variantName = parts.slice(1).join(" / ");
-        const displayName = variantName ? `${productName} / ${variantName}` : productName;
-        const qty = Number(it.qty) || 1;
-        try {
-          const { data: existing } = await supabase.from("in_stock")
-            .select("*").eq("name", displayName).maybeSingle();
-          if (existing) {
-            const newStock = (Number(existing.stock) || 0) + qty;
-            await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", existing.id);
-          } else {
-            await supabase.from("in_stock").insert([{
-              id: secureUid(), name: displayName, price: 0, stock: qty, image: "", status: "off", created_at: now,
-            }]);
-          }
-        } catch (e) { console.warn("庫存還原失敗:", e); }
-      }
-
       // 更新訂單:狀態改回 pending + 清 items + 清 stocked 旗標
       const { error } = await supabase.from("orders").update({
         status: safeS, items: newItems, stocked: false, stocked_at: null, updated_at: now
       }).eq("id", id);
       if (error) { toast(`更新失敗:${error.message}`); return; }
 
-      // 重新拉庫存
-      const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
       setData(d => ({
         ...d,
         orders: d.orders.map(x => x.id === id ? { ...x, status: safeS, items: newItems, stocked: false } : x),
-        inStock: inStockRes.data || d.inStock,
       }));
-      logAction("還原採買/配貨", `#${o.no} · 還回庫存 ${returnCount} 件`);
-      toast(`✅ 已還原${returnCount > 0 ? ` · ${returnCount} 件還回庫存` : ""}`);
+      logAction("還原採買/配貨", `#${o.no} · ${returnCount} 件品項標籤已清`);
+      toast(`✅ 已還原${returnCount > 0 ? ` · ${returnCount} 件可重新採買` : ""}`);
       return;
     }
 
-    // 特殊處理:任何狀態 → 已寄出 = 把已配貨品項數量從 in_stock.total_purchased 扣掉
+    // 特殊處理:任何狀態 → 已寄出 = 貨真的送出了,從 stock 扣掉
     if (safeS === "shipped" && o.status !== "shipped") {
       const stockedItems = (o.items || []).filter(it => it.stocked);
       // 依款式聚合 qty
@@ -921,19 +897,19 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         const displayName = variantName ? `${productName} / ${variantName}` : productName;
         groupByName.set(displayName, (groupByName.get(displayName) || 0) + (Number(it.qty) || 1));
       }
-      // 從 in_stock 扣掉 total_purchased
+      // 從 in_stock 扣掉 stock(貨真的離開了業者手上)
       for (const [displayName, qty] of groupByName.entries()) {
         try {
           const { data: existing } = await supabase.from("in_stock")
             .select("*").eq("name", displayName).maybeSingle();
           if (existing) {
-            const newTotal = Math.max(0, (Number(existing.total_purchased) || 0) - qty);
+            const newStock = Math.max(0, (Number(existing.stock) || 0) - qty);
             await supabase.from("in_stock").update({
-              total_purchased: newTotal,
+              stock: newStock,
               updated_at: new Date().toISOString()
             }).eq("id", existing.id);
           }
-        } catch (e) { console.warn("扣總進貨失敗:", e); }
+        } catch (e) { console.warn("扣庫存失敗:", e); }
       }
       // 更新訂單狀態
       const { error } = await supabase.from("orders").update({ status: safeS, updated_at: new Date().toISOString() }).eq("id", id);
@@ -946,8 +922,8 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         inStock: inStockRes.data || d.inStock,
       }));
       const totalDeducted = Array.from(groupByName.values()).reduce((a, b) => a + b, 0);
-      logAction("訂單已寄出", `#${o.no} · 扣總進貨 ${totalDeducted} 件`);
-      toast(`✅ 已寄出${totalDeducted > 0 ? ` · 從總進貨扣除 ${totalDeducted} 件` : ""}`);
+      logAction("訂單已寄出", `#${o.no} · 扣庫存 ${totalDeducted} 件`);
+      toast(`✅ 已寄出${totalDeducted > 0 ? ` · 從庫存扣除 ${totalDeducted} 件` : ""}`);
       return;
     }
 
@@ -2586,7 +2562,7 @@ function InboundPage({ data, setData, toast, setTab }) {
 
         if (existing) {
           const newTotal = (Number(existing.total_purchased) || 0) + actualBought;
-          const newStock = (Number(existing.stock) || 0) + remaining;
+          const newStock = (Number(existing.stock) || 0) + actualBought;   // 全部加,配貨不減庫存
           const { error: updErr } = await supabase.from("in_stock").update({
             total_purchased: newTotal,
             stock: newStock,
@@ -2609,7 +2585,7 @@ function InboundPage({ data, setData, toast, setTab }) {
             id: secureUid(),
             name: displayName,
             price: 0,
-            stock: remaining,
+            stock: actualBought,           // 全部進庫存
             total_purchased: actualBought,
             image: "",
             status: "off",
@@ -2622,7 +2598,7 @@ function InboundPage({ data, setData, toast, setTab }) {
             // fallback:沒 total_purchased 欄位就拿掉
             if (insErr.message && /total_purchased/.test(insErr.message)) {
               const retry = await supabase.from("in_stock").insert([{
-                id: secureUid(), name: displayName, price: 0, stock: remaining,
+                id: secureUid(), name: displayName, price: 0, stock: actualBought,
                 image: "", status: "off", created_at: new Date().toISOString(),
               }]).select();
               if (retry.error) alert(`⚠️ in_stock 建立失敗:\n${retry.error.message}`);
@@ -3245,8 +3221,8 @@ function InStockPage({ data, setData, toast }) {
       }));
     }
 
-    // 剩餘進庫存 + 更新總進貨量 (即使 remaining=0 也要更新總進貨)
-    const newStock = (Number(item.stock) || 0) + remaining;
+    // 全部進庫存 + 更新總進貨量(配貨不減 stock)
+    const newStock = (Number(item.stock) || 0) + qty;
     const newTotal = (Number(item.total_purchased) || 0) + qty;
     await supabase.from("in_stock").update({
       stock: newStock,
