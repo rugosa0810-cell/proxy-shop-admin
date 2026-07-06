@@ -1179,6 +1179,31 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
             </div>
           </div>
 
+          {/* 寄件資訊(客人結帳時填的) */}
+          {(o.delivery_method || o.recipient_phone) && (
+            <div style={{ padding:"12px 14px", background:C.accentBg, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:10, color:C.muted, fontWeight:600, letterSpacing:.5, marginBottom:6 }}>📦 寄件資訊</div>
+              <div style={{ display:"flex", gap:16, flexWrap:"wrap", fontSize:12 }}>
+                {o.delivery_method && (
+                  <div>
+                    <span style={{ color:C.muted, marginRight:4 }}>取貨:</span>
+                    <span style={{ color:C.text, fontWeight:500 }}>
+                      {o.delivery_method === "shopee" ? "賣貨便" :
+                       o.delivery_method === "meetup" ? "面交" :
+                       o.delivery_method === "delivery" ? "宅配" : o.delivery_method}
+                    </span>
+                  </div>
+                )}
+                {o.recipient_phone && (
+                  <div>
+                    <span style={{ color:C.muted, marginRight:4 }}>電話:</span>
+                    <span style={{ color:C.text, fontWeight:500 }}>{o.recipient_phone}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 區塊二:商品明細 */}
           <div style={{ padding:"14px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
