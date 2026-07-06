@@ -849,45 +849,29 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
     const o = data.orders.find(x => x.id === id);
     if (!o) return;
 
-    // 特殊處理:已採買 → 待採買 = 還原採買/配貨紀錄(貨還在手上,不動庫存)
+    // 特殊處理:已採買 → 待採買 = 還原採買/配貨紀錄,已配的貨還回庫存
     if (o.status === "bought" && safeS === "pending") {
       const stockedItems = (o.items || []).filter(it => it.stocked);
       const returnCount = stockedItems.reduce((s, it) => s + (Number(it.qty) || 1), 0);
 
       if (returnCount > 0) {
-        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),還原後品項標籤會清除,可重新採買/配貨(貨還在手上,庫存不動)。確定?`)) return;
+        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),還原後將:\n· 清除品項採買/配貨標籤\n· 已配貨的貨還回庫存 (庫存 +${returnCount})\n\n確定?`)) return;
       }
 
       // 還原品項狀態
       const now = new Date().toISOString();
       const newItems = (o.items || []).map(it => {
-        if (!it.purchased && !it.stocked) return it;
+        if (!it.purchased && !it.stocked && !it.stocked_qty) return it;
         const cleaned = { ...it };
         delete cleaned.purchased;
         delete cleaned.purchased_at;
         delete cleaned.stocked;
         delete cleaned.stocked_at;
+        delete cleaned.stocked_qty;
         return cleaned;
       });
 
-      // 更新訂單:狀態改回 pending + 清 items + 清 stocked 旗標
-      const { error } = await supabase.from("orders").update({
-        status: safeS, items: newItems, stocked: false, stocked_at: null, updated_at: now
-      }).eq("id", id);
-      if (error) { toast(`更新失敗:${error.message}`); return; }
-
-      setData(d => ({
-        ...d,
-        orders: d.orders.map(x => x.id === id ? { ...x, status: safeS, items: newItems, stocked: false } : x),
-      }));
-      logAction("還原採買/配貨", `#${o.no} · ${returnCount} 件品項標籤已清`);
-      toast(`✅ 已還原${returnCount > 0 ? ` · ${returnCount} 件可重新採買` : ""}`);
-      return;
-    }
-
-    // 特殊處理:任何狀態 → 已寄出 = 貨真的送出了,從 stock 扣掉
-    if (safeS === "shipped" && o.status !== "shipped") {
-      const stockedItems = (o.items || []).filter(it => it.stocked);
+      // 已配貨的貨還回 stock (庫存)
       // 依款式聚合 qty
       const groupByName = new Map();
       for (const it of stockedItems) {
@@ -896,6 +880,61 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         const variantName = parts.slice(1).join(" / ");
         const displayName = variantName ? `${productName} / ${variantName}` : productName;
         groupByName.set(displayName, (groupByName.get(displayName) || 0) + (Number(it.qty) || 1));
+      }
+      for (const [displayName, qty] of groupByName.entries()) {
+        try {
+          const { data: existing } = await supabase.from("in_stock")
+            .select("*").eq("name", displayName).maybeSingle();
+          if (existing) {
+            const newStock = (Number(existing.stock) || 0) + qty;
+            await supabase.from("in_stock").update({
+              stock: newStock,
+              updated_at: now
+            }).eq("id", existing.id);
+          } else {
+            // 如果 in_stock 沒紀錄,建立一筆
+            await supabase.from("in_stock").insert([{
+              id: secureUid(), name: displayName, price: 0, stock: qty,
+              total_purchased: qty, image: "", status: "off", created_at: now,
+            }]);
+          }
+        } catch (e) { console.warn("還原庫存失敗:", e); }
+      }
+
+      // 更新訂單:狀態改回 pending + 清 items + 清 stocked 旗標
+      const { error } = await supabase.from("orders").update({
+        status: safeS, items: newItems, stocked: false, stocked_at: null, updated_at: now
+      }).eq("id", id);
+      if (error) { toast(`更新失敗:${error.message}`); return; }
+
+      // 重新拉庫存
+      const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+      setData(d => ({
+        ...d,
+        orders: d.orders.map(x => x.id === id ? { ...x, status: safeS, items: newItems, stocked: false } : x),
+        inStock: inStockRes.data || d.inStock,
+      }));
+      logAction("還原採買/配貨", `#${o.no} · 還回庫存 ${returnCount} 件`);
+      toast(`✅ 已還原${returnCount > 0 ? ` · ${returnCount} 件還回庫存` : ""}`);
+      return;
+    }
+
+    // 特殊處理:任何狀態 → 已寄出 = 貨真的送出了,從 stock 扣掉
+    if (safeS === "shipped" && o.status !== "shipped") {
+      // 用 stocked_qty(舊資料 stocked=true 視為全部)判斷實際配到的量
+      const shippedItems = (o.items || []).filter(it => {
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        return sq > 0;
+      });
+      // 依款式聚合實際配到的 stocked_qty
+      const groupByName = new Map();
+      for (const it of shippedItems) {
+        const parts = String(it.name).split(" / ");
+        const productName = parts[0] || it.name;
+        const variantName = parts.slice(1).join(" / ");
+        const displayName = variantName ? `${productName} / ${variantName}` : productName;
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        groupByName.set(displayName, (groupByName.get(displayName) || 0) + sq);
       }
       // 從 in_stock 扣掉 stock(貨真的離開了業者手上)
       for (const [displayName, qty] of groupByName.entries()) {
@@ -1156,9 +1195,18 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:500, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
-                      {it.stocked
-                        ? <span style={{ background:C.green, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>✓ 已配貨</span>
-                        : it.purchased && <span style={{ background:C.accent, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>已採買待配貨</span>}
+                      {(() => {
+                        const qty = Number(it.qty) || 1;
+                        const stockedQty = Number(it.stocked_qty) || (it.stocked ? qty : 0);
+                        if (stockedQty >= qty) {
+                          return <span style={{ background:C.green, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>✓ 已配貨</span>;
+                        } else if (stockedQty > 0) {
+                          return <span style={{ background:C.pinkDark, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>部分配貨 {stockedQty}/{qty}</span>;
+                        } else if (it.purchased) {
+                          return <span style={{ background:C.accent, color:"#fff", padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600, flexShrink:0 }}>已採買待配貨</span>;
+                        }
+                        return null;
+                      })()}
                       <span>{it.name}</span>
                     </div>
                     <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>×{it.qty}</div>
@@ -2228,14 +2276,21 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   );
 }
 
-// 品項聚合 helper:把所有 pending 訂單的 items(排除已採買的品項)聚合成 { productName, variantName, count, orders[] }
+// 品項聚合 helper:把所有 pending 訂單的 items(排除已配完的品項)聚合
+// 支援部分配貨:每個品項可能有 stocked_qty(已配數量),未配的數量 = qty - stocked_qty
 function aggregatePendingItems(orders) {
   const pendingOrders = orders.filter(o => o.status === "pending" && !o.archived);
-  const groups = new Map(); // key = "商品|款式"
+  const groups = new Map();
   pendingOrders.forEach(o => {
     (o.items || []).forEach((it, itemIdx) => {
-      if (it.purchased) return; // 已採買的品項不列入
-      // it.name 通常是 "商品名 / 款式:xxx" 的格式
+      // 已配完的不列(舊資料 stocked=true 視為全配完)
+      if (it.stocked === true) return;
+      const stockedQty = Number(it.stocked_qty) || 0;
+      const qty = Number(it.qty) || 1;
+      const need = qty - stockedQty;
+      if (need <= 0) return;
+      // 未採買也不列在採購清單 → 對!採購清單只列採買前的
+      if (it.purchased) return;
       const parts = String(it.name).split(" / ");
       const productName = parts[0] || it.name;
       const variantName = parts.slice(1).join(" / ") || "(單一款式)";
@@ -2244,24 +2299,23 @@ function aggregatePendingItems(orders) {
         groups.set(key, { productName, variantName, count: 0, orderRefs: [] });
       }
       const g = groups.get(key);
-      g.count += (Number(it.qty) || 1);
+      g.count += need;
       g.orderRefs.push({
         orderId: o.id,
         orderNo: o.no,
         customer: o.customer_name || "未名",
-        qty: Number(it.qty) || 1,
+        qty: need,
         image: it.image,
         itemIdx,
       });
     });
   });
-  // 分群:同商品的款式擺在一起
   const byProduct = new Map();
   Array.from(groups.values()).forEach(g => {
     if (!byProduct.has(g.productName)) byProduct.set(g.productName, []);
     byProduct.get(g.productName).push(g);
   });
-  return Array.from(byProduct.entries()); // [[productName, [variantGroups...]]]
+  return Array.from(byProduct.entries());
 }
 
 function PurchasePage({ data, setData, toast, setTab }) {
@@ -2469,26 +2523,31 @@ function PurchasePage({ data, setData, toast, setTab }) {
 
 // 入庫配貨:列出「已採買」但尚未入庫的品項聚合,讓業者登記買到多少
 function InboundPage({ data, setData, toast, setTab }) {
-  // 從所有未封存/未取消訂單的 items 掃描:purchased=true 且 stocked !== true 的品項
+  // 從所有未封存/未取消訂單的 items 掃描:purchased=true 且未配完的品項
   const validOrders = data.orders.filter(o => !o.archived && o.status !== "cancelled");
   const groups = new Map();
   validOrders.forEach(o => {
     (o.items || []).forEach((it, itemIdx) => {
-      if (!it.purchased) return;   // 未採買不列
-      if (it.stocked) return;      // 已入庫不列
+      if (!it.purchased) return;             // 未採買不列
+      if (it.stocked === true) return;       // 舊資料:整批配完
+      const stockedQty = Number(it.stocked_qty) || 0;
+      const qty = Number(it.qty) || 1;
+      const need = qty - stockedQty;
+      if (need <= 0) return;                 // 已配完
       const parts = String(it.name).split(" / ");
       const productName = parts[0] || it.name;
       const variantName = parts.slice(1).join(" / ") || "(單一款式)";
       const key = `${productName}|||${variantName}`;
       if (!groups.has(key)) groups.set(key, { productName, variantName, needed: 0, orderRefs: [] });
       const g = groups.get(key);
-      g.needed += (Number(it.qty) || 1);
+      g.needed += need;
       g.orderRefs.push({
         orderId: o.id,
         orderNo: o.no,
         customer: o.customer_name || "未名",
-        qty: Number(it.qty) || 1,
+        qty: need,           // 只算未配的數量
         itemIdx,
+        alreadyStockedQty: stockedQty,
       });
     });
   });
@@ -2521,33 +2580,42 @@ function InboundPage({ data, setData, toast, setTab }) {
 
     let stockCount = 0;
     let processedCount = 0;
-    let allocatedItemCount = 0;   // 有配到貨的品項數
-    let unallocatedItemCount = 0; // 沒配到貨(缺量)的品項數
+    let allocatedItemCount = 0;   // 有配到貨的品項數(有增量的)
+    let allocatedUnitsCount = 0;  // 配到的貨物總件數
+    let unallocatedUnitsCount = 0; // 沒配到的貨物件數(缺量)
 
-    // 收集:每筆訂單要更新的品項 idx(只有實際配到的才 stocked)
-    const itemsToMark = new Map(); // orderId → { itemIdxes: Set }
-    const markStocked = (orderId, itemIdx) => {
-      if (!itemsToMark.has(orderId)) itemsToMark.set(orderId, new Set());
-      itemsToMark.get(orderId).add(itemIdx);
+    // 收集:每筆訂單要更新的品項 idx → 新的 stocked_qty (原有 + 新配)
+    const itemsToUpdate = new Map(); // orderId → Map(itemIdx → newStockedQty)
+    const setNewStockedQty = (orderId, itemIdx, newQty) => {
+      if (!itemsToUpdate.has(orderId)) itemsToUpdate.set(orderId, new Map());
+      itemsToUpdate.get(orderId).set(itemIdx, newQty);
     };
 
     for (const g of activeGroups) {
       const key = `${g.productName}|||${g.variantName}`;
-      const actualBought = Number(bought[key] ?? g.needed);   // 實際買到多少(全部)
-      let remaining = actualBought;   // 這個變數只用來配貨判斷
+      const actualBought = Number(bought[key] ?? g.needed);
+      let remaining = actualBought;
       const displayName = `${g.productName}${g.variantName !== "(單一款式)" ? ` / ${g.variantName}` : ""}`;
 
-      // 按 orderRefs 順序配貨(先來後到 → 訂單越早的優先)
+      // 按 orderRefs 順序配貨(先來後到)
       const sortedRefs = [...g.orderRefs].sort((a, b) => String(a.orderNo).localeCompare(String(b.orderNo)));
 
       for (const r of sortedRefs) {
+        if (remaining <= 0) {
+          unallocatedUnitsCount += r.qty;
+          continue;
+        }
         const need = Number(r.qty) || 1;
-        if (remaining >= need) {
-          markStocked(r.orderId, r.itemIdx);
-          remaining -= need;
+        const alloc = Math.min(remaining, need);   // 配到多少(能配多少配多少)
+        if (alloc > 0) {
+          const alreadyStocked = Number(r.alreadyStockedQty) || 0;
+          setNewStockedQty(r.orderId, r.itemIdx, alreadyStocked + alloc);
+          remaining -= alloc;
+          allocatedUnitsCount += alloc;
           allocatedItemCount++;
-        } else {
-          unallocatedItemCount++;
+        }
+        if (alloc < need) {
+          unallocatedUnitsCount += (need - alloc);
         }
       }
 
@@ -2618,22 +2686,31 @@ function InboundPage({ data, setData, toast, setTab }) {
       processedCount++;
     }
 
-    // 應用品項 stocked 標記到訂單(可能只有部分品項)
-    const orderPatches = itemsToMark;
-
+    // 應用品項 stocked_qty 到訂單
     const now = new Date().toISOString();
-    let allStockedCount = 0;   // 全部品項都入庫完的訂單數
-    for (const [orderId, itemIdxes] of orderPatches.entries()) {
+    let allStockedCount = 0;   // 全部品項都配完的訂單數
+    for (const [orderId, itemIdxToNewQty] of itemsToUpdate.entries()) {
       const order = data.orders.find(o => o.id === orderId);
       if (!order) continue;
-      const newItems = (order.items || []).map((it, i) =>
-        itemIdxes.has(i) ? { ...it, stocked: true, stocked_at: now } : it
-      );
-      // 判斷:所有品項都 stocked=true → 訂單狀態升為「已採買 bought」
-      const allStocked = newItems.every(it => it.stocked);
+      const newItems = (order.items || []).map((it, i) => {
+        if (!itemIdxToNewQty.has(i)) return it;
+        const newStockedQty = itemIdxToNewQty.get(i);
+        const qty = Number(it.qty) || 1;
+        return {
+          ...it,
+          stocked_qty: newStockedQty,
+          stocked: newStockedQty >= qty,       // 相容舊格式
+          stocked_at: now,
+        };
+      });
+      // 判斷所有品項都配完 (舊格式 stocked===true 或新格式 stocked_qty >= qty)
+      const allStocked = newItems.every(it => {
+        const q = Number(it.qty) || 1;
+        const sq = Number(it.stocked_qty) || (it.stocked ? q : 0);
+        return sq >= q;
+      });
       const patch = { items: newItems, updated_at: now };
       if (allStocked && order.status === "pending") {
-        // 全部品項入庫完 → 升狀態為「已採買」
         patch.status = "bought";
         patch.stocked = true;
         patch.stocked_at = now;
@@ -2642,7 +2719,6 @@ function InboundPage({ data, setData, toast, setTab }) {
       let { error } = await supabase.from("orders").update(patch).eq("id", orderId);
       if (error) {
         console.warn(`訂單 #${order.no} 更新失敗:`, error.message);
-        // fallback:沒 stocked 欄位就拿掉再試
         if (error.message && /stocked/.test(error.message)) {
           const { stocked, stocked_at, ...patchNoStocked } = patch;
           const retry = await supabase.from("orders").update(patchNoStocked).eq("id", orderId);
@@ -2666,8 +2742,8 @@ function InboundPage({ data, setData, toast, setTab }) {
     const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
     setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
 
-    logAction("批次入庫", `${processedCount} 款 · 入庫存 ${stockCount} 件${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
-    toast(`✅ 已配貨 ${allocatedItemCount} 件${stockCount > 0 ? ` · ${stockCount} 件記入庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單完成` : ""}${unallocatedItemCount > 0 ? ` · ⚠️ ${unallocatedItemCount} 件缺量待補` : ""}`);
+    logAction("批次入庫", `${processedCount} 款 · 配 ${allocatedUnitsCount} 件${stockCount > 0 ? ` · 入庫 ${stockCount}` : ""}${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
+    toast(`✅ 已配貨 ${allocatedUnitsCount} 件${stockCount > 0 ? ` · ${stockCount} 件記入庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單完成` : ""}${unallocatedUnitsCount > 0 ? ` · ⚠️ ${unallocatedUnitsCount} 件缺量待補` : ""}`);
     setBought({});
   };
 
