@@ -1180,10 +1180,10 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
           </div>
 
           {/* 寄件資訊(客人結帳時填的) */}
-          {(o.delivery_method || o.recipient_phone) && (
+          {(o.delivery_method || o.recipient_phone || o.store_name) && (
             <div style={{ padding:"12px 14px", background:C.accentBg, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}` }}>
               <div style={{ fontSize:10, color:C.muted, fontWeight:600, letterSpacing:.5, marginBottom:6 }}>📦 寄件資訊</div>
-              <div style={{ display:"flex", gap:16, flexWrap:"wrap", fontSize:12 }}>
+              <div style={{ display:"flex", gap:16, flexWrap:"wrap", fontSize:12, marginBottom: o.store_name ? 6 : 0 }}>
                 {o.delivery_method && (
                   <div>
                     <span style={{ color:C.muted, marginRight:4 }}>取貨:</span>
@@ -1201,6 +1201,17 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                   </div>
                 )}
               </div>
+              {o.store_name && (
+                <div style={{ fontSize:12, background:"#fff", padding:"6px 10px", borderRadius:6, border:`1px solid ${C.borderLight}` }}>
+                  <div style={{ fontWeight:600, color:C.accentDark }}>
+                    🏪 {o.store_name}
+                    {o.store_code && <span style={{ fontSize:10, color:C.muted, marginLeft:6, fontWeight:400 }}>#{o.store_code}</span>}
+                  </div>
+                  {o.store_address && (
+                    <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{o.store_address}</div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
