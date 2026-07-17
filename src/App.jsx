@@ -1471,7 +1471,10 @@ function AddOrderModal({ data, setData, onClose, toast }) {
     }
   });
 
-  const allCustomers = [...memberList, ...orderCustomers];
+  // tempCustomers state (要在 allCustomers 之前宣告,不然 TDZ)
+  const [tempCustomers, setTempCustomers] = useState([]);
+
+  const allCustomers = [...memberList, ...orderCustomers, ...tempCustomers];
 
   const [customerId, setCustomerId] = useState(allCustomers[0]?.id || "");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1521,9 +1524,9 @@ function AddOrderModal({ data, setData, onClose, toast }) {
     const n = sanitize(newCustomerName, 50);
     if (!n) { alert("請填寫客人姓名"); return; }
     const tempId = `temp:${n}:${Date.now()}`;
+    const newTemp = { id: tempId, name: n, communityName: "", phone: "", isMember: false, source: "臨時客人" };
+    setTempCustomers(prev => [...prev, newTemp]);
     setCustomerId(tempId);
-    // 把新客人塞進列表(暫時)
-    allCustomers.push({ id: tempId, name: n, communityName: "", phone: "", isMember: false });
     setShowNewCustomer(false);
     setNewCustomerName("");
     setSearchTerm("");
@@ -1636,14 +1639,23 @@ function AddOrderModal({ data, setData, onClose, toast }) {
                       placeholder="搜尋姓名 / 社群 / 電話"
                       style={{ flex: 1, background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", color: C.text }}/>
                     <button onClick={() => setShowNewCustomer(true)}
-                      style={{ background: C.accent, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
-                      <Icon name="plus" size={14} /> 新增
+                      style={{ background: C.accent, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                      <Icon name="plus" size={14} /> 新增臨時客人
                     </button>
                   </div>
                   <div style={{ maxHeight: 240, overflowY: "auto", border: `0.5px solid ${C.border}`, borderRadius: 10, background: C.bgCard }}>
                     {filteredCustomers.length === 0 && (
-                      <div style={{ padding: "24px 14px", textAlign: "center", fontSize: 12, color: C.muted }}>
-                        {searchTerm ? `找不到「${searchTerm}」` : "尚無客人,請按「+ 新增」"}
+                      <div style={{ padding: "24px 14px", textAlign: "center" }}>
+                        <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
+                          {searchTerm ? `找不到「${searchTerm}」` : "尚無客人"}
+                        </div>
+                        <button onClick={() => {
+                          setShowNewCustomer(true);
+                          if (searchTerm) setNewCustomerName(searchTerm);
+                        }}
+                          style={{ background: C.accent, color: "#fff", border: "none", borderRadius: 10, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                          + 新增臨時客人{searchTerm ? `「${searchTerm}」` : ""}
+                        </button>
                       </div>
                     )}
                     {filteredCustomers.map(c => (
@@ -2773,6 +2785,9 @@ function PurchasesPage({ data, setData, toast }) {
 function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast }) {
   const isEdit = !!purchase;
   const [productName, setProductName] = useState(purchase?.product_name || prefillName || "");
+  useEffect(() => {
+    if (prefillName && !purchase) setProductName(prefillName);
+  }, [prefillName, purchase]);
   const [qty, setQty] = useState(purchase?.qty || "");
   const [unitCost, setUnitCost] = useState(purchase?.unit_cost || "");
   const [purchasedAt, setPurchasedAt] = useState(purchase?.purchased_at || new Date().toISOString().slice(0,10));
