@@ -2364,6 +2364,9 @@ function PurchasePage({ data, setData, toast, setTab }) {
     data.orders.filter(o => o.status === "pending" && !o.archived).map(o => o.id)
   ).size;
 
+  // 「進貨這款」按鈕開的 Modal(預填完整款式名)
+  const [purchaseFor, setPurchaseFor] = useState(null);
+
   // 找出款式在 in_stock 的 stock (可用庫存)
   const getStock = (productName, variantName) => {
     const displayName = variantName && variantName !== "(單一款式)" ? `${productName} / ${variantName}` : productName;
@@ -2606,7 +2609,7 @@ function PurchasePage({ data, setData, toast, setTab }) {
                           })()}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
                         {(() => {
                           const stock = getStock(productName, v.variantName);
                           if (stock > 0) return (
@@ -2617,6 +2620,13 @@ function PurchasePage({ data, setData, toast, setTab }) {
                           );
                           return null;
                         })()}
+                        <button onClick={() => {
+                          const displayName = v.variantName && v.variantName !== "(單一款式)" ? `${productName} / ${v.variantName}` : productName;
+                          setPurchaseFor({ name: displayName });
+                        }}
+                          style={{ background: C.accentBg, color: C.accent, border: `1.5px solid ${C.accent}`, padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                          📥 進貨這款
+                        </button>
                         <button onClick={() => markVariantBought(productName, v.variantName)}
                           style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
                           ✓ 已採買
@@ -2657,11 +2667,10 @@ function PurchasePage({ data, setData, toast, setTab }) {
           </div>
         </div>
       )}
+      {purchaseFor && <PurchaseModal prefillName={purchaseFor.name} onClose={() => setPurchaseFor(null)} data={data} setData={setData} toast={toast} />}
     </div>
   );
 }
-
-// 進項紀錄頁面:每筆採買歷史 + 新增進貨(可自動配貨)
 function PurchasesPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -2770,8 +2779,21 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
   const [note, setNote] = useState(purchase?.note || "");
   const [autoAllocate, setAutoAllocate] = useState(!isEdit); // 編輯時預設不自動配
 
-  // 現有的 in_stock 款式選項
-  const inStockOptions = (data.inStock || []).map(x => x.name);
+  // 建議清單:in_stock 已有的款式 + 所有待配貨訂單品項的完整名稱
+  const suggestOptions = (() => {
+    const set = new Set((data.inStock || []).map(x => x.name));
+    (data.orders || []).forEach(o => {
+      if (o.archived || o.status === "cancelled") return;
+      (o.items || []).forEach(it => {
+        if (it.stocked === true) return;
+        const sq = Number(it.stocked_qty) || 0;
+        const q = Number(it.qty) || 1;
+        if (sq >= q) return; // 已配完
+        set.add(String(it.name));
+      });
+    });
+    return Array.from(set);
+  })();
 
   const totalCost = (Number(qty) || 0) * (Number(unitCost) || 0);
 
@@ -2972,7 +2994,7 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
             placeholder="例:蛤蜊風味 或 東京圭美 / 蛤蜊風味"
             style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
           <datalist id="stock-options">
-            {inStockOptions.map(n => <option key={n} value={n} />)}
+            {suggestOptions.map(n => <option key={n} value={n} />)}
           </datalist>
           {pendingCount > 0 && productName && (
             <div style={{ fontSize: 11, color: C.accent, marginTop: 4 }}>💡 此款式有 {pendingCount} 件待配貨訂單</div>
