@@ -2761,9 +2761,9 @@ function PurchasesPage({ data, setData, toast }) {
 }
 
 // 新增/編輯進貨 Modal
-function PurchaseModal({ purchase, onClose, data, setData, toast }) {
+function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast }) {
   const isEdit = !!purchase;
-  const [productName, setProductName] = useState(purchase?.product_name || "");
+  const [productName, setProductName] = useState(purchase?.product_name || prefillName || "");
   const [qty, setQty] = useState(purchase?.qty || "");
   const [unitCost, setUnitCost] = useState(purchase?.unit_cost || "");
   const [purchasedAt, setPurchasedAt] = useState(purchase?.purchased_at || new Date().toISOString().slice(0,10));
@@ -3716,6 +3716,7 @@ function RevenuePage({ data }) {
 function InStockPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [purchaseFor, setPurchaseFor] = useState(null);  // 開 PurchaseModal 時的預填款式
 
   const del = async (id) => {
     if (!window.confirm("確定刪除？")) return;
@@ -3742,83 +3743,9 @@ function InStockPage({ data, setData, toast }) {
   };
 
   // 進貨:填數量 → 系統自動配貨到待配貨訂單,剩餘進庫存
-  const restock = async (item) => {
-    const input = window.prompt(`「${item.name}」這次採買數量?\n\n系統會自動配給待配貨的訂單(已採買但未配貨),剩餘進庫存。`, "");
-    if (input === null) return;
-    const qty = Math.max(0, Math.floor(Number(input) || 0));
-    if (qty <= 0) { toast("請輸入 > 0 的數量"); return; }
-
-    let remaining = qty;
-    let allocatedCount = 0;
-    let completedOrders = 0;
-
-    // 找出這款式所有 purchased=true 且 stocked !== true 的品項(依訂單先來後到)
-    const targetRefs = [];
-    (data.orders || []).filter(o => !o.archived && o.status !== "cancelled").forEach(o => {
-      (o.items || []).forEach((it, idx) => {
-        if (!it.purchased || it.stocked) return;
-        const parts = String(it.name).split(" / ");
-        const displayName = parts.slice(1).join(" / ")
-          ? `${parts[0]} / ${parts.slice(1).join(" / ")}`
-          : parts[0];
-        if (displayName === item.name) {
-          targetRefs.push({ order: o, itemIdx: idx, qty: Number(it.qty) || 1 });
-        }
-      });
-    });
-    targetRefs.sort((a, b) => String(a.order.no).localeCompare(String(b.order.no)));
-
-    // 配貨
-    const now = new Date().toISOString();
-    const orderPatches = new Map(); // orderId → itemIdxes
-    for (const r of targetRefs) {
-      if (remaining >= r.qty) {
-        if (!orderPatches.has(r.order.id)) orderPatches.set(r.order.id, new Set());
-        orderPatches.get(r.order.id).add(r.itemIdx);
-        remaining -= r.qty;
-        allocatedCount += r.qty;
-      }
-    }
-
-    // 更新訂單品項 stocked
-    for (const [orderId, idxes] of orderPatches.entries()) {
-      const order = data.orders.find(o => o.id === orderId);
-      if (!order) continue;
-      const newItems = (order.items || []).map((it, i) =>
-        idxes.has(i) ? { ...it, stocked: true, stocked_at: now } : it
-      );
-      const allStocked = newItems.every(it => it.stocked);
-      const patch = { items: newItems, updated_at: now };
-      if (allStocked && order.status === "pending") {
-        patch.status = "bought";
-        patch.stocked = true;
-        patch.stocked_at = now;
-        completedOrders++;
-      }
-      const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
-      if (error) { console.warn("訂單更新失敗:", error); continue; }
-      setData(d => ({
-        ...d,
-        orders: d.orders.map(x => x.id === orderId ? {
-          ...x, items: newItems,
-          ...(patch.status ? { status: patch.status } : {}),
-          ...(patch.stocked ? { stocked: true, stocked_at: now } : {})
-        } : x)
-      }));
-    }
-
-    // 全部進庫存 + 更新總進貨量(配貨不減 stock)
-    const newStock = (Number(item.stock) || 0) + qty;
-    const newTotal = (Number(item.total_purchased) || 0) + qty;
-    await supabase.from("in_stock").update({
-      stock: newStock,
-      total_purchased: newTotal,
-      updated_at: now
-    }).eq("id", item.id);
-    setData(d => ({ ...d, inStock: d.inStock.map(x => x.id === item.id ? { ...x, stock: newStock, total_purchased: newTotal } : x) }));
-
-    logAction("進貨", `${item.name} · 採買 ${qty} 件 · 配貨 ${allocatedCount} · 入庫 ${remaining}`);
-    toast(`✅ 進貨 ${qty} 件 · 配貨 ${allocatedCount}${completedOrders > 0 ? ` · ${completedOrders} 筆訂單完成`: ""}${remaining > 0 ? ` · ${remaining} 件入庫` : ""}`);
+  // 「+ 進貨」按鈕:打開 PurchaseModal,預填此款式(和進項紀錄頁共用同一個 Modal)
+  const openPurchase = (item) => {
+    setPurchaseFor(item);
   };
 
   // 上下架切換
@@ -3934,7 +3861,7 @@ function InStockPage({ data, setData, toast }) {
           </div>
           {/* 操作區:進貨 + 上下架 */}
           <div style={{ display: "flex", gap: 6, padding: "10px 14px", background: "#fff", borderTop: `1px solid ${C.borderLight}` }}>
-            <button onClick={() => restock(item)}
+            <button onClick={() => openPurchase(item)}
               style={{ flex: 1, background: C.accentBg, color: C.accentDark, border: `1.5px solid ${C.accent}`, padding: "9px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
               📥 + 進貨 (自動配貨)
             </button>
@@ -3948,6 +3875,7 @@ function InStockPage({ data, setData, toast }) {
 
       {showAdd  && <StockModal onSave={saveNew}  onClose={() => setShowAdd(false)} />}
       {editing  && <StockModal product={editing} onSave={saveEdit} onClose={() => setEditing(null)} />}
+      {purchaseFor && <PurchaseModal prefillName={purchaseFor.name} onClose={() => setPurchaseFor(null)} data={data} setData={setData} toast={toast} />}
     </div>
   );
 }
