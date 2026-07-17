@@ -2980,6 +2980,34 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
     }));
 
     logAction("新增進項", `${record.product_name} × ${record.qty} · 成本 ${totalCost}${autoAllocatedCount > 0 ? ` · 自動配 ${autoAllocatedCount}` : ""}`);
+
+    // 若勾了自動配貨但配到 0 件 → 提示業者
+    if (autoAllocate && autoAllocatedCount === 0) {
+      // 找找看有沒有名稱相近的訂單品項(前綴匹配)
+      const similar = [];
+      (data.orders || []).forEach(o => {
+        if (o.archived || o.status === "cancelled") return;
+        (o.items || []).forEach(it => {
+          if (!it.purchased || it.stocked === true) return;
+          const sq = Number(it.stocked_qty) || 0;
+          const q = Number(it.qty) || 1;
+          if (sq >= q) return;
+          // 檢查商品名(第一層)是否與進貨名相符或包含
+          const parts = String(it.name).split(" / ");
+          const productBase = parts[0];
+          const purchaseBase = record.product_name.split(" / ")[0];
+          if (productBase === purchaseBase && it.name !== record.product_name) {
+            similar.push(String(it.name));
+          }
+        });
+      });
+      if (similar.length > 0) {
+        alert(`⚠️ 進貨成功,但沒有自動配到任何訂單。\n\n進貨款式名:「${record.product_name}」\n\n訂單需要的款式(名稱不完全相符):\n${[...new Set(similar)].slice(0,5).map(n => `• ${n}`).join("\n")}\n\n💡 建議:回採購清單按「進貨這款」,款式名會自動預填完整名稱。`);
+      } else {
+        alert(`⚠️ 進貨成功,但沒有自動配到任何訂單。\n\n可能原因:目前沒有訂單需要「${record.product_name}」這個款式。\n\n進貨紀錄已建立,庫存也已加。`);
+      }
+    }
+
     toast(`✅ 已新增進項${autoAllocatedCount > 0 ? ` · 自動配貨 ${autoAllocatedCount} 件` : ""}`);
     onClose();
   };
