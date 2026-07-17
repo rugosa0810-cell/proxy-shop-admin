@@ -493,7 +493,8 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       supabase.from("announcements").select("*").order("created_at", { ascending: false }),
       supabase.from("wishlist").select("*").order("created_at", { ascending: false }),
       supabase.from("members").select("*"),
-    ]).then(([o, p, s, a, w, m]) => {
+      supabase.from("purchases").select("*").order("purchased_at", { ascending: false }),
+    ]).then(([o, p, s, a, w, m, pu]) => {
       if (o.error) console.error("orders 載入失敗:", o.error);
       if (p.error) console.error("products 載入失敗:", p.error);
       if (s.error) console.error("in_stock 載入失敗:", s.error);
@@ -503,6 +504,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         console.error("members 載入失敗:", m.error);
         showToast(`⚠️ 客人資料載入失敗:${m.error.message || "權限不足"}`);
       }
+      if (pu.error) console.warn("purchases 載入失敗:", pu.error);   // 靜默(可能表還沒建)
       setData(d => ({
         ...d,
         orders:        o.data || [],
@@ -511,8 +513,9 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         announcements: a.data || [],
         wishlist:      w.data || [],
         members:       m.data || [],
+        purchases:     pu.data || [],
       }));
-      console.log(`📊 已載入: 訂單 ${(o.data||[]).length}, 商品 ${(p.data||[]).length}, 現貨 ${(s.data||[]).length}, 會員 ${(m.data||[]).length}, 許願 ${(w.data||[]).length}`);
+      console.log(`📊 已載入: 訂單 ${(o.data||[]).length}, 商品 ${(p.data||[]).length}, 現貨 ${(s.data||[]).length}, 會員 ${(m.data||[]).length}, 許願 ${(w.data||[]).length}, 進項 ${(pu.data||[]).length}`);
     }).catch(err => console.error("Supabase 載入失敗", err));
   }, []);
 
@@ -663,7 +666,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
   ];
   const TABS_MORE = [
     { id: "purchase",  label: "採購清單",   icon: "clipboard-list" },
-    { id: "inbound",   label: "入庫配貨",   icon: "package-import" },
+    { id: "purchases", label: "進項紀錄",   icon: "receipt" },
     { id: "instock",   label: "現貨/庫存",  icon: "package" },
     { id: "wishlist",  label: "許願清單",   icon: "star" },
     { id: "revenue",   label: "營收報表",   icon: "chart-bar" },
@@ -744,7 +747,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "catalog"       && <CatalogPage       data={data} setData={setData} toast={showToast} mobile={mobile} />}
         {tab === "instock"       && <InStockPage       data={data} setData={setData} toast={showToast} />}
         {tab === "purchase"      && <PurchasePage      data={data} setData={setData} toast={showToast} setTab={setTab} />}
-        {tab === "inbound"       && <InboundPage       data={data} setData={setData} toast={showToast} setTab={setTab} />}
+        {tab === "purchases"     && <PurchasesPage     data={data} setData={setData} toast={showToast} />}
         {tab === "revenue"       && <RevenuePage       data={data} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
@@ -2361,6 +2364,88 @@ function PurchasePage({ data, setData, toast, setTab }) {
     data.orders.filter(o => o.status === "pending" && !o.archived).map(o => o.id)
   ).size;
 
+  // 找出款式在 in_stock 的 stock (可用庫存)
+  const getStock = (productName, variantName) => {
+    const displayName = variantName && variantName !== "(單一款式)" ? `${productName} / ${variantName}` : productName;
+    const item = (data.inStock || []).find(x => x.name === displayName);
+    return item ? (Number(item.stock) || 0) : 0;
+  };
+
+  // 手動用庫存配貨
+  const allocateFromStock = async (productName, variantName, orderRefs) => {
+    const displayName = variantName && variantName !== "(單一款式)" ? `${productName} / ${variantName}` : productName;
+    const stockItem = (data.inStock || []).find(x => x.name === displayName);
+    const available = stockItem ? (Number(stockItem.stock) || 0) : 0;
+    if (available <= 0) { toast("庫存不足"); return; }
+
+    const totalNeed = orderRefs.reduce((s, r) => s + r.qty, 0);
+    if (!window.confirm(`從庫存配貨:\n\n款式:${variantName}\n可用庫存:${available} 件\n需求:${totalNeed} 件\n\n依訂單先來後到分配,能配多少配多少。`)) return;
+
+    let remaining = available;
+    const sortedRefs = [...orderRefs].sort((a, b) => String(a.orderNo).localeCompare(String(b.orderNo)));
+    const orderPatches = new Map();
+    let allocated = 0;
+    const now = new Date().toISOString();
+
+    for (const r of sortedRefs) {
+      if (remaining <= 0) break;
+      const alloc = Math.min(remaining, r.qty);
+      if (alloc > 0) {
+        if (!orderPatches.has(r.orderId)) orderPatches.set(r.orderId, new Map());
+        // 取原本的 stocked_qty
+        const order = data.orders.find(o => o.id === r.orderId);
+        const item = order?.items?.[r.itemIdx];
+        const sq = Number(item?.stocked_qty) || 0;
+        orderPatches.get(r.orderId).set(r.itemIdx, sq + alloc);
+        remaining -= alloc;
+        allocated += alloc;
+      }
+    }
+
+    for (const [orderId, idxToNewSq] of orderPatches.entries()) {
+      const order = data.orders.find(o => o.id === orderId);
+      if (!order) continue;
+      const newItems = (order.items || []).map((it, i) => {
+        if (!idxToNewSq.has(i)) return it;
+        const newSq = idxToNewSq.get(i);
+        const q = Number(it.qty) || 1;
+        return { ...it, stocked_qty: newSq, stocked: newSq >= q, stocked_at: now };
+      });
+      const allStocked = newItems.every(it => {
+        const q = Number(it.qty) || 1;
+        const sq = Number(it.stocked_qty) || (it.stocked ? q : 0);
+        return sq >= q;
+      });
+      const patch = { items: newItems, updated_at: now };
+      if (allStocked && order.status === "pending") {
+        patch.status = "bought";
+        patch.stocked = true;
+        patch.stocked_at = now;
+      }
+      const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
+      if (error && /stocked/.test(error.message)) {
+        const { stocked, stocked_at, ...noStocked } = patch;
+        await supabase.from("orders").update(noStocked).eq("id", orderId);
+      }
+    }
+
+    // 扣 stock
+    if (allocated > 0) {
+      const newStock = Math.max(0, available - allocated);
+      await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", stockItem.id);
+    }
+
+    // 重拉
+    const [ordersRes, inStockRes] = await Promise.all([
+      supabase.from("orders").select("*").order("created_at", { ascending: false }),
+      supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
+    ]);
+    setData(d => ({ ...d, orders: ordersRes.data || d.orders, inStock: inStockRes.data || d.inStock }));
+
+    logAction("庫存配貨", `${displayName} · ${allocated} 件`);
+    toast(`✅ 從庫存配貨 ${allocated} 件`);
+  };
+
   // 勾選狀態:key = `productName|||variantName`
   const [selected, setSelected] = useState(new Set());
 
@@ -2482,9 +2567,9 @@ function PurchasePage({ data, setData, toast, setTab }) {
               {allSelected ? "☑ 取消全選" : "☐ 全選"}
             </button>
           )}
-          <button onClick={() => setTab("inbound")}
+          <button onClick={() => setTab("purchases")}
             style={{ background: C.accent, color: "#fff", border: "none", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-            入庫配貨 →
+            📥 新增進貨
           </button>
         </div>
       </div>
@@ -2512,12 +2597,31 @@ function PurchasePage({ data, setData, toast, setTab }) {
                         style={{ width: 18, height: 18, accentColor: C.accent, cursor: "pointer", flexShrink: 0 }}/>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{v.variantName}</div>
-                        <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>需 {v.count} 件</div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <span>需 {v.count} 件</span>
+                          {(() => {
+                            const stock = getStock(productName, v.variantName);
+                            if (stock > 0) return <span style={{ color: C.green, fontWeight: 600 }}>· 庫存 {stock} 可配</span>;
+                            return null;
+                          })()}
+                        </div>
                       </div>
-                      <button onClick={() => markVariantBought(productName, v.variantName)}
-                        style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                        ✓ 已採買
-                      </button>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                        {(() => {
+                          const stock = getStock(productName, v.variantName);
+                          if (stock > 0) return (
+                            <button onClick={() => allocateFromStock(productName, v.variantName, v.orderRefs)}
+                              style={{ background: C.pinkBg, color: C.pinkDark, border: `1.5px solid ${C.pinkDark}`, padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                              📦 用庫存配
+                            </button>
+                          );
+                          return null;
+                        })()}
+                        <button onClick={() => markVariantBought(productName, v.variantName)}
+                          style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                          ✓ 已採買
+                        </button>
+                      </div>
                     </div>
                     <div style={{ paddingLeft: 28, marginTop: 8 }}>
                       {v.orderRefs.map((r, ri) => (
@@ -2554,6 +2658,376 @@ function PurchasePage({ data, setData, toast, setTab }) {
         </div>
       )}
     </div>
+  );
+}
+
+// 進項紀錄頁面:每筆採買歷史 + 新增進貨(可自動配貨)
+function PurchasesPage({ data, setData, toast }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const purchases = data.purchases || [];
+  const totalQty = purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0);
+  const totalCost = purchases.reduce((s, p) => s + (Number(p.total_cost) || 0), 0);
+
+  const del = async (p) => {
+    if (!window.confirm(`確定刪除「${p.product_name}」× ${p.qty} 件的進貨紀錄?\n\n⚠️ 這只會刪除歷史紀錄,不會扣掉 in_stock 已加的庫存(需手動調整)。`)) return;
+    const { error } = await supabase.from("purchases").delete().eq("id", p.id);
+    if (error) { toast(`刪除失敗:${error.message}`); return; }
+    setData(d => ({ ...d, purchases: (d.purchases||[]).filter(x => x.id !== p.id) }));
+    logAction("刪除進項", `${p.product_name} × ${p.qty}`);
+    toast("已刪除進項紀錄");
+  };
+
+  const exportCSV = () => {
+    const rows = [["日期", "款式", "數量", "單價", "總成本", "自動配貨", "備註"]];
+    purchases.forEach(p => {
+      rows.push([
+        p.purchased_at || "",
+        p.product_name || "",
+        Number(p.qty) || 0,
+        Number(p.unit_cost) || 0,
+        Number(p.total_cost) || 0,
+        Number(p.auto_allocated) || 0,
+        p.note || "",
+      ]);
+    });
+    rows.push([]);
+    rows.push(["合計", "", totalQty, "", totalCost, "", ""]);
+    const csv = "\uFEFF" + rows.map(r => r.map(c => {
+      const s = String(c);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `進項紀錄_${new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📥 進項紀錄</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>共 {purchases.length} 筆進貨 · 累計 {totalQty} 件 · 成本 {fmtMoney(totalCost)}</div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={exportCSV} style={{ background: C.green, color: "#fff", border: "none", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>📥 CSV</button>
+          <Btn sm onClick={() => setShowAdd(true)}>＋ 新增進貨</Btn>
+        </div>
+      </div>
+
+      {purchases.length === 0 ? (
+        <Card style={{ padding: "48px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📥</div>
+          <div style={{ fontSize: 14, color: C.muted, marginBottom: 4 }}>還沒有進貨紀錄</div>
+          <div style={{ fontSize: 11, color: C.faint }}>按上方「+ 新增進貨」開始</div>
+        </Card>
+      ) : (
+        purchases.map(p => (
+          <Card key={p.id} style={{ padding: "12px 14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{p.product_name}</div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{p.purchased_at || "未指定日期"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => setEditing(p)} style={{ background: C.accentBg, color: C.accent, border: `1px solid ${C.accent}30`, padding: "5px 9px", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                <button onClick={() => del(p)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 14 }}>🗑</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12 }}>
+              <div><span style={{ color: C.muted }}>數量 </span><span style={{ fontWeight: 700, color: C.accentDark }}>{Number(p.qty) || 0}</span></div>
+              <div><span style={{ color: C.muted }}>單價 </span><span style={{ color: C.text }}>{fmtMoney(Number(p.unit_cost) || 0)}</span></div>
+              <div><span style={{ color: C.muted }}>總成本 </span><span style={{ fontWeight: 700, color: C.green }}>{fmtMoney(Number(p.total_cost) || 0)}</span></div>
+              {Number(p.auto_allocated) > 0 && (
+                <div style={{ background: C.pinkBg, color: C.pinkDark, padding: "1px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600 }}>✓ 自動配貨 {p.auto_allocated}</div>
+              )}
+            </div>
+            {p.note && <div style={{ fontSize: 11, color: C.muted, marginTop: 6, padding: "4px 8px", background: C.bgDeep, borderRadius: 4 }}>📝 {p.note}</div>}
+          </Card>
+        ))
+      )}
+
+      {showAdd && <PurchaseModal onClose={() => setShowAdd(false)} data={data} setData={setData} toast={toast} />}
+      {editing && <PurchaseModal purchase={editing} onClose={() => setEditing(null)} data={data} setData={setData} toast={toast} />}
+    </div>
+  );
+}
+
+// 新增/編輯進貨 Modal
+function PurchaseModal({ purchase, onClose, data, setData, toast }) {
+  const isEdit = !!purchase;
+  const [productName, setProductName] = useState(purchase?.product_name || "");
+  const [qty, setQty] = useState(purchase?.qty || "");
+  const [unitCost, setUnitCost] = useState(purchase?.unit_cost || "");
+  const [purchasedAt, setPurchasedAt] = useState(purchase?.purchased_at || new Date().toISOString().slice(0,10));
+  const [note, setNote] = useState(purchase?.note || "");
+  const [autoAllocate, setAutoAllocate] = useState(!isEdit); // 編輯時預設不自動配
+
+  // 現有的 in_stock 款式選項
+  const inStockOptions = (data.inStock || []).map(x => x.name);
+
+  const totalCost = (Number(qty) || 0) * (Number(unitCost) || 0);
+
+  // 顯示這款式待配貨的訂單數
+  const pendingCount = (() => {
+    if (!productName) return 0;
+    let count = 0;
+    (data.orders || []).forEach(o => {
+      if (o.archived || o.status === "cancelled") return;
+      (o.items || []).forEach(it => {
+        if (!it.purchased) return;
+        if (it.stocked === true) return;
+        const parts = String(it.name).split(" / ");
+        const p = parts[0] || it.name;
+        const v = parts.slice(1).join(" / ");
+        const name = v ? `${p} / ${v}` : p;
+        if (name !== productName) return;
+        const sq = Number(it.stocked_qty) || 0;
+        const need = (Number(it.qty) || 1) - sq;
+        if (need > 0) count += need;
+      });
+    });
+    return count;
+  })();
+
+  const save = async () => {
+    if (!productName.trim()) { toast("請填品項名稱"); return; }
+    if (!qty || Number(qty) <= 0) { toast("請填數量"); return; }
+    const now = new Date().toISOString();
+    const record = {
+      id: purchase?.id || secureUid(),
+      product_name: productName.trim(),
+      qty: Number(qty),
+      unit_cost: Number(unitCost) || 0,
+      total_cost: totalCost,
+      purchased_at: purchasedAt,
+      note: note.trim(),
+      created_at: purchase?.created_at || now,
+    };
+
+    if (isEdit) {
+      // 編輯:先扣掉原來 qty,加回新 qty(避免庫存亂)
+      const oldQty = Number(purchase.qty) || 0;
+      const diff = record.qty - oldQty;
+      const { error } = await supabase.from("purchases").update(record).eq("id", record.id);
+      if (error) { toast(`更新失敗:${error.message}`); return; }
+      // 調整 in_stock
+      try {
+        const { data: existing } = await supabase.from("in_stock").select("*").eq("name", record.product_name).maybeSingle();
+        if (existing) {
+          const newTotal = Math.max(0, (Number(existing.total_purchased) || 0) + diff);
+          const newStock = Math.max(0, (Number(existing.stock) || 0) + diff);
+          await supabase.from("in_stock").update({ total_purchased: newTotal, stock: newStock, updated_at: now }).eq("id", existing.id);
+        }
+      } catch (e) { console.warn("in_stock 調整失敗:", e); }
+      setData(d => ({ ...d, purchases: (d.purchases||[]).map(x => x.id === record.id ? record : x) }));
+      logAction("編輯進項", `${record.product_name} × ${record.qty}`);
+      toast("已更新進項紀錄");
+      onClose();
+      return;
+    }
+
+    // 新增進貨
+    let autoAllocatedCount = 0;
+    try {
+      // 1. 建立 purchases 紀錄
+      const { error: pErr } = await supabase.from("purchases").insert([record]);
+      if (pErr) { toast(`新增失敗:${pErr.message}`); return; }
+
+      // 2. 更新 in_stock:total_purchased += qty, stock += qty
+      const { data: existing } = await supabase.from("in_stock").select("*").eq("name", record.product_name).maybeSingle();
+      if (existing) {
+        const newTotal = (Number(existing.total_purchased) || 0) + record.qty;
+        const newStock = (Number(existing.stock) || 0) + record.qty;
+        await supabase.from("in_stock").update({ total_purchased: newTotal, stock: newStock, updated_at: now }).eq("id", existing.id);
+      } else {
+        await supabase.from("in_stock").insert([{
+          id: secureUid(),
+          name: record.product_name,
+          price: 0,
+          stock: record.qty,
+          total_purchased: record.qty,
+          image: "",
+          status: "off",
+          created_at: now,
+        }]);
+      }
+
+      // 3. 若勾選自動配貨,掃描待配貨訂單依先來後到分配
+      if (autoAllocate) {
+        let remaining = record.qty;
+        // 找出這款式所有待配的訂單品項
+        const targets = [];
+        (data.orders || []).filter(o => !o.archived && o.status !== "cancelled").forEach(o => {
+          (o.items || []).forEach((it, idx) => {
+            if (!it.purchased) return;
+            if (it.stocked === true) return;
+            const parts = String(it.name).split(" / ");
+            const p = parts[0] || it.name;
+            const v = parts.slice(1).join(" / ");
+            const name = v ? `${p} / ${v}` : p;
+            if (name !== record.product_name) return;
+            const sq = Number(it.stocked_qty) || 0;
+            const need = (Number(it.qty) || 1) - sq;
+            if (need > 0) targets.push({ order: o, itemIdx: idx, need, sq });
+          });
+        });
+        // 排序:訂單早的先
+        targets.sort((a, b) => String(a.order.no).localeCompare(String(b.order.no)));
+
+        // 配貨
+        const orderPatches = new Map(); // orderId → { idxToNewSq }
+        for (const t of targets) {
+          if (remaining <= 0) break;
+          const alloc = Math.min(remaining, t.need);
+          if (alloc > 0) {
+            if (!orderPatches.has(t.order.id)) orderPatches.set(t.order.id, new Map());
+            orderPatches.get(t.order.id).set(t.itemIdx, t.sq + alloc);
+            remaining -= alloc;
+            autoAllocatedCount += alloc;
+          }
+        }
+
+        // 應用到訂單
+        for (const [orderId, idxToNewSq] of orderPatches.entries()) {
+          const order = data.orders.find(o => o.id === orderId);
+          if (!order) continue;
+          const newItems = (order.items || []).map((it, i) => {
+            if (!idxToNewSq.has(i)) return it;
+            const newSq = idxToNewSq.get(i);
+            const q = Number(it.qty) || 1;
+            return { ...it, stocked_qty: newSq, stocked: newSq >= q, stocked_at: now };
+          });
+          const allStocked = newItems.every(it => {
+            const q = Number(it.qty) || 1;
+            const sq = Number(it.stocked_qty) || (it.stocked ? q : 0);
+            return sq >= q;
+          });
+          const patch = { items: newItems, updated_at: now };
+          if (allStocked && order.status === "pending") {
+            patch.status = "bought";
+            patch.stocked = true;
+            patch.stocked_at = now;
+          }
+          const { error: ordErr } = await supabase.from("orders").update(patch).eq("id", orderId);
+          if (ordErr && /stocked/.test(ordErr.message)) {
+            const { stocked, stocked_at, ...noStocked } = patch;
+            await supabase.from("orders").update(noStocked).eq("id", orderId);
+          }
+        }
+
+        // 自動配貨消耗掉的量從 stock 扣掉
+        if (autoAllocatedCount > 0) {
+          const { data: cur } = await supabase.from("in_stock").select("*").eq("name", record.product_name).maybeSingle();
+          if (cur) {
+            const newStock = Math.max(0, (Number(cur.stock) || 0) - autoAllocatedCount);
+            await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", cur.id);
+          }
+        }
+
+        // 更新 purchases.auto_allocated
+        if (autoAllocatedCount > 0) {
+          await supabase.from("purchases").update({ auto_allocated: autoAllocatedCount }).eq("id", record.id);
+          record.auto_allocated = autoAllocatedCount;
+        }
+      }
+    } catch (e) {
+      console.error("進貨失敗:", e);
+      toast(`錯誤:${e.message || e}`);
+      return;
+    }
+
+    // 重新拉資料
+    const [ordersRes, inStockRes, purchasesRes] = await Promise.all([
+      supabase.from("orders").select("*").order("created_at", { ascending: false }),
+      supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
+      supabase.from("purchases").select("*").order("purchased_at", { ascending: false }),
+    ]);
+    setData(d => ({
+      ...d,
+      orders: ordersRes.data || d.orders,
+      inStock: inStockRes.data || d.inStock,
+      purchases: purchasesRes.data || d.purchases,
+    }));
+
+    logAction("新增進項", `${record.product_name} × ${record.qty} · 成本 ${totalCost}${autoAllocatedCount > 0 ? ` · 自動配 ${autoAllocatedCount}` : ""}`);
+    toast(`✅ 已新增進項${autoAllocatedCount > 0 ? ` · 自動配貨 ${autoAllocatedCount} 件` : ""}`);
+    onClose();
+  };
+
+  return (
+    <Modal title={isEdit ? "編輯進項" : "新增進貨"} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 4, fontWeight: 600 }}>品項名稱 *</label>
+          <input type="text" value={productName} onChange={e => setProductName(e.target.value)}
+            list="stock-options"
+            placeholder="例:蛤蜊風味 或 東京圭美 / 蛤蜊風味"
+            style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+          <datalist id="stock-options">
+            {inStockOptions.map(n => <option key={n} value={n} />)}
+          </datalist>
+          {pendingCount > 0 && productName && (
+            <div style={{ fontSize: 11, color: C.accent, marginTop: 4 }}>💡 此款式有 {pendingCount} 件待配貨訂單</div>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 4, fontWeight: 600 }}>數量 *</label>
+            <input type="number" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value)} min="1"
+              style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 4, fontWeight: 600 }}>單價成本 NT$</label>
+            <input type="number" inputMode="numeric" value={unitCost} onChange={e => setUnitCost(e.target.value)} min="0"
+              style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+        </div>
+
+        <div style={{ padding: "10px 12px", background: C.accentBg, borderRadius: 8, display: "flex", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, color: C.muted }}>總成本</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: C.green }}>{fmtMoney(totalCost)}</span>
+        </div>
+
+        <div>
+          <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 4, fontWeight: 600 }}>採買日期</label>
+          <input type="date" value={purchasedAt} onChange={e => setPurchasedAt(e.target.value)}
+            style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+        </div>
+
+        <div>
+          <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 4, fontWeight: 600 }}>備註</label>
+          <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+            placeholder="例:日本代購,匯率 0.22"
+            style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }}/>
+        </div>
+
+        {!isEdit && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: autoAllocate ? C.greenBg : C.bgDeep, borderRadius: 8, cursor: "pointer", border: `1.5px solid ${autoAllocate ? C.green : C.border}` }}>
+            <input type="checkbox" checked={autoAllocate} onChange={e => setAutoAllocate(e.target.checked)} style={{ width: 18, height: 18, accentColor: C.green }}/>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: autoAllocate ? C.green : C.text }}>🎯 進貨後自動配貨</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>依訂單先來後到分配,配完自動升訂單狀態</div>
+            </div>
+          </label>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "10px", border: `1px solid ${C.border}`, background: "#fff", borderRadius: 8, cursor: "pointer" }}>取消</button>
+          <button onClick={save} style={{ flex: 2, padding: "10px", background: C.accent, color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>
+            {isEdit ? "儲存編輯" : "確認新增進貨"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
