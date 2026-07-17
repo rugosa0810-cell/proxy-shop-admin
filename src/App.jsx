@@ -2817,9 +2817,8 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
     if (!productName) return 0;
     let count = 0;
     (data.orders || []).forEach(o => {
-      if (o.archived || o.status === "cancelled") return;
+      if (o.archived || o.status !== "pending") return;
       (o.items || []).forEach(it => {
-        if (!it.purchased) return;
         if (it.stocked === true) return;
         const parts = String(it.name).split(" / ");
         const p = parts[0] || it.name;
@@ -2900,11 +2899,10 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
       // 3. 若勾選自動配貨,掃描待配貨訂單依先來後到分配
       if (autoAllocate) {
         let remaining = record.qty;
-        // 找出這款式所有待配的訂單品項
+        // 找出這款式所有待配的訂單品項(狀態是待採買 pending 就可配,不必先按已採買)
         const targets = [];
-        (data.orders || []).filter(o => !o.archived && o.status !== "cancelled").forEach(o => {
+        (data.orders || []).filter(o => !o.archived && o.status === "pending").forEach(o => {
           (o.items || []).forEach((it, idx) => {
-            if (!it.purchased) return;
             if (it.stocked === true) return;
             const parts = String(it.name).split(" / ");
             const p = parts[0] || it.name;
@@ -3001,9 +2999,9 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
       // 找找看有沒有名稱相近的訂單品項(前綴匹配)
       const similar = [];
       (data.orders || []).forEach(o => {
-        if (o.archived || o.status === "cancelled") return;
+        if (o.archived || o.status !== "pending") return;
         (o.items || []).forEach(it => {
-          if (!it.purchased || it.stocked === true) return;
+          if (it.stocked === true) return;
           const sq = Number(it.stocked_qty) || 0;
           const q = Number(it.qty) || 1;
           if (sq >= q) return;
