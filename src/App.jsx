@@ -2327,30 +2327,28 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   );
 }
 
-// 品項聚合 helper:把所有 pending 訂單的 items(排除已配完的品項)聚合
+// 品項聚合 helper:列出所有 pending 訂單未配完的品項(不管有無 purchased 標記)
 // 支援部分配貨:每個品項可能有 stocked_qty(已配數量),未配的數量 = qty - stocked_qty
 function aggregatePendingItems(orders) {
   const pendingOrders = orders.filter(o => o.status === "pending" && !o.archived);
   const groups = new Map();
   pendingOrders.forEach(o => {
     (o.items || []).forEach((it, itemIdx) => {
-      // 已配完的不列(舊資料 stocked=true 視為全配完)
-      if (it.stocked === true) return;
+      if (it.stocked === true) return;  // 舊資料:全部配完
       const stockedQty = Number(it.stocked_qty) || 0;
       const qty = Number(it.qty) || 1;
       const need = qty - stockedQty;
-      if (need <= 0) return;
-      // 未採買也不列在採購清單 → 對!採購清單只列採買前的
-      if (it.purchased) return;
+      if (need <= 0) return;  // 已配完
       const parts = String(it.name).split(" / ");
       const productName = parts[0] || it.name;
       const variantName = parts.slice(1).join(" / ") || "(單一款式)";
       const key = `${productName}|||${variantName}`;
       if (!groups.has(key)) {
-        groups.set(key, { productName, variantName, count: 0, orderRefs: [] });
+        groups.set(key, { productName, variantName, count: 0, orderRefs: [], purchasedRefs: 0 });
       }
       const g = groups.get(key);
       g.count += need;
+      if (it.purchased) g.purchasedRefs += 1;   // 記錄有幾筆已按過已採買
       g.orderRefs.push({
         orderId: o.id,
         orderNo: o.no,
@@ -2358,6 +2356,9 @@ function aggregatePendingItems(orders) {
         qty: need,
         image: it.image,
         itemIdx,
+        purchased: !!it.purchased,
+        stockedQty,
+        origQty: qty,
       });
     });
   });
@@ -2614,6 +2615,12 @@ function PurchasePage({ data, setData, toast, setTab }) {
                         <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{v.variantName}</div>
                         <div style={{ fontSize: 11, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <span>需 {v.count} 件</span>
+                          {v.purchasedRefs > 0 && v.purchasedRefs === v.orderRefs.length && (
+                            <span style={{ color: C.accent, fontWeight: 600 }}>· 已標記採買 ✓</span>
+                          )}
+                          {v.purchasedRefs > 0 && v.purchasedRefs < v.orderRefs.length && (
+                            <span style={{ color: C.accent, fontWeight: 600 }}>· 部分已標記採買 ({v.purchasedRefs}/{v.orderRefs.length})</span>
+                          )}
                           {(() => {
                             const stock = getStock(productName, v.variantName);
                             if (stock > 0) return <span style={{ color: C.green, fontWeight: 600 }}>· 庫存 {stock} 可配</span>;
@@ -2637,18 +2644,26 @@ function PurchasePage({ data, setData, toast, setTab }) {
                           setPurchaseFor({ name: displayName });
                         }}
                           style={{ background: C.accentBg, color: C.accent, border: `1.5px solid ${C.accent}`, padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                          📥 進貨這款
+                          📥 進貨配貨
                         </button>
-                        <button onClick={() => markVariantBought(productName, v.variantName)}
-                          style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                          ✓ 已採買
-                        </button>
+                        {v.purchasedRefs < v.orderRefs.length && (
+                          <button onClick={() => markVariantBought(productName, v.variantName)}
+                            style={{ background: C.green, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            ✓ 已採買
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div style={{ paddingLeft: 28, marginTop: 8 }}>
                       {v.orderRefs.map((r, ri) => (
-                        <div key={ri} style={{ fontSize: 11, color: C.textMid, padding: "2px 0" }}>
-                          · #{r.orderNo} · {r.customer} × {r.qty}
+                        <div key={ri} style={{ fontSize: 11, color: C.textMid, padding: "2px 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span>· #{r.orderNo} · {r.customer} × {r.qty}</span>
+                          {r.stockedQty > 0 && r.stockedQty < r.origQty && (
+                            <span style={{ fontSize: 9, padding: "1px 5px", background: C.pinkBg, color: C.pinkDark, borderRadius: 4, fontWeight: 600 }}>已配 {r.stockedQty}/{r.origQty}</span>
+                          )}
+                          {r.purchased && (
+                            <span style={{ fontSize: 9, padding: "1px 5px", background: C.accentBg, color: C.accent, borderRadius: 4, fontWeight: 600 }}>✓ 已採買</span>
+                          )}
                         </div>
                       ))}
                     </div>
