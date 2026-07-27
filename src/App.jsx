@@ -2020,6 +2020,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   });
   const [vName, setVName]       = useState("");
   const [vPrice, setVPrice]     = useState("");
+  const [vWholesalePrice, setVWholesalePrice] = useState("");
   const [vCostJpy, setVCostJpy] = useState("");
   const [vCostTwd, setVCostTwd] = useState("");
   const [costMode, setCostMode] = useState("twd"); // "twd"=直填台幣, "jpy"=日幣×匯率自動算
@@ -2053,8 +2054,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       cost = Number(vCostTwd) || 0;
       jpy = effectiveRate > 0 ? Math.round(cost / effectiveRate) : 0;
     }
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, costJpy:jpy, cost }]);
-    setVName(""); setVPrice(""); setVCostJpy(""); setVCostTwd("");
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost }]);
+    setVName(""); setVPrice(""); setVWholesalePrice(""); setVCostJpy(""); setVCostTwd("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -2236,6 +2237,13 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                         style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, boxSizing:"border-box", minWidth:0 }}/>
                     </div>
                     <div>
+                      <div style={{ fontSize:10, color:C.pinkDark, marginBottom:3, fontWeight:500 }}>💎 批發價 NT$ <span style={{ color:C.faint, fontWeight:400 }}>(0=同零售)</span></div>
+                      <input type="number" inputMode="numeric" value={v.wholesale_price||0}
+                        onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, wholesale_price:Number(e.target.value)||0} : x))}
+                        placeholder="0"
+                        style={{ width:"100%", background:C.pinkBg, border:`1px solid ${C.pinkDark}30`, borderRadius:8, padding:"8px 10px", fontSize:14, color:C.pinkDark, fontWeight:600, boxSizing:"border-box", minWidth:0 }}/>
+                    </div>
+                    <div>
                       <div style={{ fontSize:10, color:C.muted, marginBottom:3, fontWeight:500 }}>💱 匯率 ¥1 = NT$</div>
                       <input type="number" step="0.001" inputMode="decimal" value={v.rate != null ? v.rate : effectiveRate}
                         onChange={e => {
@@ -2285,7 +2293,10 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
           <div style={{ padding:"12px 14px", background:C.accentBg, borderRadius:10, border:`1px dashed ${C.accent}50` }}>
             <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontWeight:600 }}>+ 新增款式</div>
             <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ marginBottom:8 }} />
-            <Input label="售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" style={{ marginBottom:8 }} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+              <Input label="零售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" />
+              <Input label="💎 批發價 NT$" type="number" value={vWholesalePrice} onChange={setVWholesalePrice} placeholder="0 (不填=同零售價)" />
+            </div>
 
             {/* 成本模式切換 */}
             <div style={{ marginBottom:8 }}>
@@ -4281,6 +4292,53 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
   const [noteInput, setNoteInput]     = useState("");
   const [notifyTargets, setNotifyTargets] = useState(null);
 
+  // 生成批發客編號 W + YYMMDD + 3位序號
+  const generateWholesaleNo = () => {
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(-2);
+    const mm = String(now.getMonth()+1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const prefix = `W${yy}${mm}${dd}`;
+    const todayNos = (data.members || [])
+      .filter(m => m.wholesale_no && String(m.wholesale_no).startsWith(prefix))
+      .map(m => Number(String(m.wholesale_no).slice(prefix.length)) || 0);
+    const nextSeq = Math.max(0, ...todayNos) + 1;
+    return `${prefix}${String(nextSeq).padStart(3, "0")}`;
+  };
+
+  // 切換批發客身分
+  const toggleWholesale = async (customer) => {
+    const memberInfo = (data.members || []).find(m => m.line_user_id === customer.lineId);
+    if (!memberInfo) { toast("此客人尚未註冊,無法設為批發客"); return; }
+
+    const newIsWholesale = !memberInfo.is_wholesale;
+    const now = new Date().toISOString();
+    let newNo = memberInfo.wholesale_no || "";
+
+    if (newIsWholesale) {
+      // 開啟批發客 → 若無編號則生成
+      if (!newNo) newNo = generateWholesaleNo();
+      if (!window.confirm(`將「${customer.name}」設為批發客?\n\n會員編號:${newNo}\n\n之後客人端會看到批發價。`)) return;
+    } else {
+      if (!window.confirm(`取消「${customer.name}」的批發客身分?\n(會員編號保留但停用)`)) return;
+    }
+
+    const patch = { is_wholesale: newIsWholesale };
+    if (newIsWholesale && newNo !== memberInfo.wholesale_no) {
+      patch.wholesale_no = newNo;
+      patch.wholesale_since = now;
+    }
+
+    const { error } = await supabase.from("members").update(patch).eq("id", memberInfo.id);
+    if (error) { toast(`更新失敗:${error.message}`); return; }
+    setData(d => ({
+      ...d,
+      members: (d.members || []).map(m => m.id === memberInfo.id ? { ...m, ...patch } : m),
+    }));
+    logAction(newIsWholesale ? "設為批發客" : "取消批發客", `${customer.name} · ${newNo}`);
+    toast(newIsWholesale ? `✅ 已設為批發客 · 編號 ${newNo}` : "已取消批發客身分");
+  };
+
   // ── 從訂單動態彙整客人清單 ──────────────────────────────────
   // 不依賴 data.customers，直接從 data.orders 聚合
   // key = customer_line_id(Supabase)或 customerId(本機)
@@ -4305,6 +4363,9 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
         sevenStore:    memberInfo?.seven_store || "",
         lineId2:       memberInfo?.line_id || "",
         note:          data.customerNotes?.[key] || "",
+        isWholesale:   !!memberInfo?.is_wholesale,
+        wholesaleNo:   memberInfo?.wholesale_no || "",
+        memberId:      memberInfo?.id || null,
         orders:        [],
       };
     }
@@ -4425,7 +4486,12 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                   {c.name?.[0] || "?"}
                 </div>
                 <div>
-                  <div style={{ fontWeight:700, fontSize:15 }}>{c.name}</div>
+                  <div style={{ fontWeight:700, fontSize:15, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                    <span>{c.name}</span>
+                    {c.isWholesale && (
+                      <span style={{ fontSize:9, padding:"2px 6px", background:C.pinkDark, color:"#fff", borderRadius:4, fontWeight:600 }}>💎 批發客 {c.wholesaleNo}</span>
+                    )}
+                  </div>
                   {c.note
                     ? <div style={{ fontSize:11, color:C.accent, marginTop:2 }}>📝 {c.note}</div>
                     : <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>LINE：{c.lineId ? c.lineId.slice(0,12)+"…" : "—"}</div>
@@ -4466,6 +4532,10 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                       <div style={{ flex:1, fontSize:13, color:c.note ? C.text : C.muted }}>
                         📝 {c.note || "尚無備註（可記電話、地址、VIP 備注）"}
                       </div>
+                      <button onClick={e => { e.stopPropagation(); toggleWholesale(c); }}
+                        style={{ fontSize:11, background:c.isWholesale?C.pinkDark:"#fff", color:c.isWholesale?"#fff":C.pinkDark, border:`1.5px solid ${C.pinkDark}`, borderRadius:99, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontWeight:600 }}>
+                        {c.isWholesale ? "💎 取消批發" : "💎 設為批發客"}
+                      </button>
                       <button onClick={e => { e.stopPropagation(); setNotifyTargets([{ name: c.name, lineUserId: c.lineId }]); }}
                         style={{ fontSize:11, background:"#3d4a3e", color:"#fff", border:"none", borderRadius:99, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontWeight:600 }}>
                         📨 通知
