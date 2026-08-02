@@ -83,36 +83,20 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const fmtMoney = (n) => `NT$${Number(n || 0).toLocaleString()}`;
 const today = () => new Date().toLocaleDateString("zh-TW");
 
+// 客人端 LIFF URL(全域)
+const CUSTOMER_LIFF_URL = "https://liff.line.me/2009872512-JJAaJ7Bi";
+
+// INIT_DATA:僅供離線 fallback 用,實際資料由 Supabase 提供
 const INIT_DATA = {
   rate: 0.26,
-  customers: [
-    { id: "c1", name: "曉曉", phone: "0912-345-678", address: "台北市", level: "黃金" },
-    { id: "c2", name: "Mina", phone: "0923-456-789", address: "新北市", level: "鑽石" },
-    { id: "c3", name: "小雨", phone: "0934-567-890", address: "台中市", level: "白銀" },
-  ],
-  products: [
-    { id: "p1", name: "高島屋土產代購", price: 0, image: "", status: "on", category: "土產/大型" },
-    { id: "p2", name: "無印良品代購",   price: 0, image: "", status: "on", category: "生活" },
-    { id: "p3", name: "藥妝代購",       price: 0, image: "", status: "on", category: "藥妝" },
-    { id: "p4", name: "🇯🇵 7-11代購",   price: 0, image: "", status: "on", category: "便利商店" },
-    { id: "p5", name: "吉伊卡哇手遊",   price: 0, image: "", status: "on", category: "玩具" },
-  ],
-  inStock: [
-    { id: "s1", name: "Hello Kitty 鑰匙圈 草莓款", price: 350, image: "🎀", status: "on" },
-    { id: "s2", name: "Sanrio 吊飾 新款",          price: 280, image: "⭐", status: "on" },
-  ],
-  orders: [
-    { id: "o1", no: "7346", customerId: "c1", customerName: "曉曉", status: "cancelled",     items: [{ name: "🇯🇵 7-11代購",   cost: 32,   price: 39,   qty: 1, note: "" }], total: 39,   profit: 7,   createdAt: "2026-04-16" },
-    { id: "o2", no: "7301", customerId: "c2", customerName: "Mina", status: "bought",        items: [{ name: "資生堂防曬乳",   cost: 560,  price: 728,  qty: 1, note: "" }], total: 728,  profit: 168, createdAt: "2026-04-14" },
-    { id: "o3", no: "7298", customerId: "c3", customerName: "小雨", status: "pending_review",items: [{ name: "Nike Air Max 2024", cost: 3120, price: 3800, qty: 1, note: "白色 25cm" }], total: 3800, profit: 680, createdAt: "2026-04-13" },
-  ],
-  wishlist: [
-    { id: "w1", customerId: "c1", customerName: "曉曉", name: "限定版茶杯組",   note: "京都限定款", status: "searching" },
-    { id: "w2", customerId: "c2", customerName: "Mina", name: "Sanrio 吊飾 新款", note: "",         status: "found" },
-  ],
-  announcements: [
-    { id: "an1", title: "第一天（4/21）行程公告", content: "🍒 藥妝 711 吉伊卡哇手遊 高島屋土產\n✨ 08:00 SUGI藥妝（美妝為主）\n大國藥妝（藥品為主）\n── 停留1小時 ──\n✨ 09:10 7-11（拍拍零食）\n── 停留30分鐘 ──\n✨ 09:45 唐吉軻德（拍照+採買）\n── 停留1小時 ──\n✨ 11:00 難波丸井百貨\n── 停留2.5小時 ──\n✨ 21:00 自由活動" }
-  ],
+  customers: [],
+  products: [],
+  inStock: [],
+  orders: [],
+  wishlist: [],
+  announcements: [],
+  members: [],
+  purchases: [],
 };
 
 // ─── Styles ──────────────────────────────────────────────────────
@@ -310,34 +294,46 @@ const loginLimiter = createRateLimiter(5, 5 * 60 * 1000);
 // ─── Export CSV ───────────────────────────────────────────────────
 function exportCSV(orders, filename) {
   const header = [
-    "訂單號","訂單日期","社群名稱","商品","規格","數量","成本","售價","利潤",
-    "國際運費","收款日期","出貨日期","付款方式","後五碼","是否已收款","狀態"
+    "訂單號","訂單日期","社群名稱","批發客","批發編號","商品","規格","數量","成本","售價","利潤",
+    "取貨方式","門市名稱","門市代碼","收件電話",
+    "國際運費","收款日期","出貨日期","付款方式","匯款銀行","後五碼","訂金金額","是否已收款","狀態"
   ];
+  const deliveryLabel = m => m === "shopee" ? "賣貨便" : m === "meetup" ? "面交" : m === "delivery" ? "宅配" : (m || "");
   // 每個品項分一行
   const rows = [];
   orders.forEach(o => {
     const name = o.community_name || o.customer_name || o.customerName || "";
     const date = o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : (o.createdAt || "");
     const items = o.items || [];
+    const isW = o.is_wholesale ? "💎批發" : "";
+    const wNo = o.wholesale_no || "";
     if (items.length === 0) {
-      rows.push(["#"+sanitize(o.no), date, sanitize(name), "", "", 0, 0, o.total||0, o.profit||0, "", o.payment_date||"", o.ship_date||"", o.payment_method||"", o.bank_code||"", o.paid?"是":"否", ORDER_STATUS[o.status]?.label||o.status]);
+      rows.push(["#"+sanitize(o.no), date, sanitize(name), isW, wNo, "", "", 0, 0, o.total||0, o.profit||0, deliveryLabel(o.delivery_method), o.store_name||"", o.store_code||"", o.recipient_phone||"", "", o.payment_date||"", o.ship_date||"", o.payment_method||"", o.deposit_bank||"", o.deposit_last5||o.bank_code||"", o.deposit_amount||"", o.paid?"是":"否", ORDER_STATUS[o.status]?.label||o.status]);
     } else {
       items.forEach((it, idx) => {
         rows.push([
           idx === 0 ? "#"+sanitize(o.no) : "",
           idx === 0 ? date : "",
           idx === 0 ? sanitize(name) : "",
+          idx === 0 ? isW : "",
+          idx === 0 ? wNo : "",
           sanitize((it.name||"").split(" / ")[0] || ""),
           sanitize((it.name||"").split(" / ").slice(1).join(" / ") || it.spec || it.note || ""),
           it.qty || 1,
           (it.cost || 0) * (it.qty || 1),
           (it.price || 0) * (it.qty || 1),
           ((it.price || 0) - (it.cost || 0)) * (it.qty || 1),
+          idx === 0 ? deliveryLabel(o.delivery_method) : "",
+          idx === 0 ? (o.store_name || "") : "",
+          idx === 0 ? (o.store_code || "") : "",
+          idx === 0 ? (o.recipient_phone || "") : "",
           idx === 0 ? (o.shipping_fee || "") : "",
           idx === 0 ? (o.payment_date || "") : "",
           idx === 0 ? (o.ship_date || "") : "",
           idx === 0 ? (o.payment_method === "transfer" ? "匯款" : o.payment_method === "cod" ? "貨到付款" : "") : "",
-          idx === 0 ? (o.bank_code || "") : "",
+          idx === 0 ? (o.deposit_bank || "") : "",
+          idx === 0 ? (o.deposit_last5 || o.bank_code || "") : "",
+          idx === 0 ? (o.deposit_amount || "") : "",
           idx === 0 ? (o.paid ? "是" : "否") : "",
           idx === 0 ? (ORDER_STATUS[o.status]?.label || o.status) : "",
         ]);
@@ -600,6 +596,18 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "announcements" }, payload => {
         setData(d => ({ ...d, announcements: d.announcements.filter(a => a.id !== payload.old.id) }));
       })
+      // ── 進項 purchases 即時同步 ────
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "purchases" }, payload => {
+        setData(d => (d.purchases || []).find(p => p.id === payload.new.id)
+          ? d
+          : ({ ...d, purchases: [payload.new, ...(d.purchases || [])] }));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "purchases" }, payload => {
+        setData(d => ({ ...d, purchases: (d.purchases || []).map(p => p.id === payload.new.id ? payload.new : p) }));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "purchases" }, payload => {
+        setData(d => ({ ...d, purchases: (d.purchases || []).filter(p => p.id !== payload.old.id) }));
+      })
       .subscribe((status) => {
         console.log("📡 Realtime status:", status);
         if (status === "SUBSCRIBED") {
@@ -646,10 +654,11 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
     }
   };
 
-  const totalOrders = data.orders.length;
-  const pendingBuy  = data.orders.filter(o => o.status === "pending").length;
-  const bought      = data.orders.filter(o => o.status === "bought").length;
-  const profit      = data.orders.filter(o => o.status !== "cancelled").reduce((s, o) => s + (o.profit||0), 0);
+  const activeOrders = data.orders.filter(o => !o.archived);
+  const totalOrders = activeOrders.length;
+  const pendingBuy  = activeOrders.filter(o => o.status === "pending").length;
+  const bought      = activeOrders.filter(o => o.status === "bought").length;
+  const profit      = activeOrders.filter(o => o.status !== "cancelled").reduce((s, o) => s + (o.profit||0), 0);
 
   // ── 統計卡片點擊篩選 ─────────────────────────────────────────
   const [orderFilter, setOrderFilter] = useState("all");
@@ -854,8 +863,15 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
 
     // 特殊處理:已採買 → 待採買 = 還原採買/配貨紀錄,已配的貨還回庫存
     if (o.status === "bought" && safeS === "pending") {
-      const stockedItems = (o.items || []).filter(it => it.stocked);
-      const returnCount = stockedItems.reduce((s, it) => s + (Number(it.qty) || 1), 0);
+      // 用 stocked_qty(舊資料 stocked=true 視為全配完)
+      const stockedItems = (o.items || []).filter(it => {
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        return sq > 0;
+      });
+      const returnCount = stockedItems.reduce((s, it) => {
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        return s + sq;
+      }, 0);
 
       if (returnCount > 0) {
         if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),還原後將:\n· 清除品項採買/配貨標籤\n· 已配貨的貨還回庫存 (庫存 +${returnCount})\n\n確定?`)) return;
@@ -874,36 +890,25 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         return cleaned;
       });
 
-      // 已配貨的貨還回 stock (庫存)
-      // 依款式聚合 qty
+      // 已配貨的貨還回 stock(用 stocked_qty)
       const groupByName = new Map();
       for (const it of stockedItems) {
         const parts = String(it.name).split(" / ");
         const productName = parts[0] || it.name;
         const variantName = parts.slice(1).join(" / ");
         const displayName = variantName ? `${productName} / ${variantName}` : productName;
-        groupByName.set(displayName, (groupByName.get(displayName) || 0) + (Number(it.qty) || 1));
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        groupByName.set(displayName, (groupByName.get(displayName) || 0) + sq);
       }
       for (const [displayName, qty] of groupByName.entries()) {
         try {
-          const { data: existing } = await supabase.from("in_stock")
-            .select("*").eq("name", displayName).maybeSingle();
+          const { data: existing } = await supabase.from("in_stock").select("*").eq("name", displayName).maybeSingle();
           if (existing) {
             const newStock = (Number(existing.stock) || 0) + qty;
-            await supabase.from("in_stock").update({
-              stock: newStock,
-              updated_at: now
-            }).eq("id", existing.id);
-          } else {
-            // 如果 in_stock 沒紀錄,建立一筆
-            await supabase.from("in_stock").insert([{
-              id: secureUid(), name: displayName, price: 0, stock: qty,
-              total_purchased: qty, image: "", status: "off", created_at: now,
-            }]);
+            await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", existing.id);
           }
-        } catch (e) { console.warn("還原庫存失敗:", e); }
+        } catch (e) { console.warn("庫存還原失敗:", e); }
       }
-
       // 更新訂單:狀態改回 pending + 清 items + 清 stocked 旗標
       const { error } = await supabase.from("orders").update({
         status: safeS, items: newItems, stocked: false, stocked_at: null, updated_at: now
@@ -977,11 +982,55 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
     toast("狀態已更新");
   };
   const del = async (id) => {
-    if (!window.confirm("確定刪除？")) return;
+    const o = data.orders.find(x => x.id === id);
+    if (!o) return;
+
+    // 檢查是否有已配貨的品項,若有需先還庫存
+    const stockedItems = (o.items || []).filter(it => {
+      const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+      return sq > 0;
+    });
+    const returnCount = stockedItems.reduce((s, it) => {
+      const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+      return s + sq;
+    }, 0);
+
+    let confirmMsg = `確定刪除訂單 #${o.no}?`;
+    if (returnCount > 0 && o.status !== "shipped") {
+      confirmMsg = `⚠️ 訂單 #${o.no} 有 ${returnCount} 件已配貨的貨(未寄出)\n\n刪除訂單前將:\n· 已配貨的貨還回庫存 (庫存 +${returnCount})\n· 永久刪除訂單\n\n確定?`;
+    }
+    if (!window.confirm(confirmMsg)) return;
+
+    // 若有已配貨的品項(且尚未寄出)→ 還回庫存
+    const now = new Date().toISOString();
+    if (returnCount > 0 && o.status !== "shipped") {
+      const groupByName = new Map();
+      for (const it of stockedItems) {
+        const parts = String(it.name).split(" / ");
+        const productName = parts[0] || it.name;
+        const variantName = parts.slice(1).join(" / ");
+        const displayName = variantName ? `${productName} / ${variantName}` : productName;
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        groupByName.set(displayName, (groupByName.get(displayName) || 0) + sq);
+      }
+      for (const [displayName, qty] of groupByName.entries()) {
+        try {
+          const { data: existing } = await supabase.from("in_stock").select("*").eq("name", displayName).maybeSingle();
+          if (existing) {
+            const newStock = (Number(existing.stock) || 0) + qty;
+            await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", existing.id);
+          }
+        } catch (e) { console.warn("刪除時還原庫存失敗:", e); }
+      }
+      const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+      setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
+    }
+
     const { error } = await supabase.from("orders").delete().eq("id", id);
     if (error) { toast("刪除失敗"); return; }
     setData(d => ({ ...d, orders: d.orders.filter(o => o.id !== id) }));
-    toast("已刪除");
+    logAction("刪除訂單", `#${o.no}${returnCount > 0 ? ` · 還回庫存 ${returnCount} 件` : ""}`);
+    toast(`✅ 已刪除${returnCount > 0 && o.status !== "shipped" ? ` · 還回 ${returnCount} 件` : ""}`);
   };
 
   return (
@@ -1089,6 +1138,9 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
               <span>{displayName}</span>
               {displayLineName && displayLineName !== displayName && (
                 <span style={{ fontSize:11, color:C.accent, fontWeight:500 }}>@{displayLineName}</span>
+              )}
+              {(o.is_wholesale || memberInfo?.is_wholesale) && (
+                <span style={{ fontSize:9, padding:"1px 6px", background:C.pinkDark, color:"#fff", borderRadius:4, fontWeight:600 }}>💎 批發</span>
               )}
             </div>
             <div style={{ fontSize:12, color:C.muted }}>
@@ -1838,9 +1890,534 @@ function ReviewPage({ data, setData, toast }) {
   );
 }
 
+// ─── 分享商品 Modal(含 QR Code、多種文案) ─────────────────────
+function ShareProductModal({ product, onClose, toast }) {
+  const [selectedVariantId, setSelectedVariantId] = useState("");
+  const [messageMode, setMessageMode] = useState("full"); // full / simple / justLink
+  const [copied, setCopied] = useState(false);
+
+  const variants = product?.variants || [];
+  const selectedVariant = variants.find(v => v.id === selectedVariantId);
+
+  // 生成 URL
+  const buildUrl = () => {
+    let url = `${CUSTOMER_LIFF_URL}?product=${encodeURIComponent(product.id)}`;
+    if (selectedVariantId) url += `&variant=${encodeURIComponent(selectedVariantId)}`;
+    return url;
+  };
+
+  const url = buildUrl();
+
+  // 商品最低價
+  const variantPrices = variants.map(v => Number(v.price) || 0).filter(x => x > 0);
+  const minPrice = variantPrices.length ? Math.min(...variantPrices) : 0;
+  const maxPrice = variantPrices.length ? Math.max(...variantPrices) : 0;
+  const priceLabel = selectedVariant
+    ? `NT$ ${Number(selectedVariant.price) || 0}`
+    : minPrice === maxPrice ? `NT$ ${minPrice}` : `NT$ ${minPrice} ~ ${maxPrice}`;
+
+  // 產生文案
+  const buildMessage = () => {
+    const name = product.name || "商品";
+    const vName = selectedVariant ? ` / ${selectedVariant.name}` : "";
+    if (messageMode === "justLink") {
+      return url;
+    }
+    if (messageMode === "simple") {
+      return `🛍 ${name}${vName}\n${url}`;
+    }
+    // full
+    let msg = `🛍 ${name}${vName}\n\n💰 ${priceLabel}`;
+    if (product.deadline) msg += `\n📅 結單:${product.deadline}`;
+    if (product.expected_arrival) msg += `\n🚚 預計到貨:${product.expected_arrival}`;
+    msg += `\n\n👇 點連結加入購物車\n${url}`;
+    return msg;
+  };
+
+  const message = buildMessage();
+
+  // QR Code URL(用免費 API)
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(url)}&color=8a6d63&bgcolor=faf2ee&margin=8`;
+
+  // 複製
+  const copyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopied(true);
+      toast?.("✅ 已複製");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      window.prompt("請手動複製:", message);
+    }
+  };
+
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast?.("✅ 網址已複製");
+    } catch (e) {
+      window.prompt("請手動複製網址:", url);
+    }
+  };
+
+  // LINE 分享(若在 LIFF/LINE 內)
+  const shareToLine = () => {
+    const lineShareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(message)}`;
+    window.open(lineShareUrl, "_blank");
+  };
+
+  // Native share
+  const nativeShare = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: product.name,
+          text: message,
+          url,
+        });
+      } else {
+        copyMessage();
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") console.error(e);
+    }
+  };
+
+  return (
+    <Modal title="🔗 分享商品" onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* 商品資訊卡 */}
+        <div style={{ display: "flex", gap: 10, padding: "10px 12px", background: C.bgDeep, borderRadius: 10 }}>
+          {product.image?.startsWith("data:") || product.image?.startsWith("http") ? (
+            <img src={product.image} alt={product.name} style={{ width: 60, height: 60, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}/>
+          ) : (
+            <div style={{ width: 60, height: 60, borderRadius: 8, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{product.image || "🛒"}</div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 2 }}>{product.name}</div>
+            <div style={{ fontSize: 12, color: C.accent, fontWeight: 600 }}>{priceLabel}</div>
+          </div>
+        </div>
+
+        {/* 選擇款式(如有多款) */}
+        {variants.length > 0 && (
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>
+              📌 指定款式 <span style={{ color: C.faint, fontWeight: 400 }}>(可選,不選則分享全部)</span>
+            </label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button onClick={() => setSelectedVariantId("")}
+                style={{ padding: "6px 12px", borderRadius: 99, border: `1.5px solid ${selectedVariantId === "" ? C.accent : C.border}`, background: selectedVariantId === "" ? C.accentBg : "#fff", color: selectedVariantId === "" ? C.accent : C.textMid, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                全部款式
+              </button>
+              {variants.map(v => (
+                <button key={v.id} onClick={() => setSelectedVariantId(v.id === selectedVariantId ? "" : v.id)}
+                  style={{ padding: "6px 12px", borderRadius: 99, border: `1.5px solid ${selectedVariantId === v.id ? C.accent : C.border}`, background: selectedVariantId === v.id ? C.accentBg : "#fff", color: selectedVariantId === v.id ? C.accent : C.textMid, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  {v.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 文案模式 */}
+        <div>
+          <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>📝 文案模式</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[
+              { key: "full", label: "完整" },
+              { key: "simple", label: "精簡" },
+              { key: "justLink", label: "純網址" },
+            ].map(opt => (
+              <button key={opt.key} onClick={() => setMessageMode(opt.key)}
+                style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${messageMode === opt.key ? C.accent : C.border}`, background: messageMode === opt.key ? C.accentBg : "#fff", color: messageMode === opt.key ? C.accent : C.textMid, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 預覽文案 */}
+        <div>
+          <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>👁 預覽</label>
+          <textarea readOnly value={message} rows={6}
+            style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, background: C.bgDeep, color: C.text, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit", lineHeight: 1.6 }}/>
+        </div>
+
+        {/* QR Code(可折疊) */}
+        <details style={{ background: C.bgDeep, borderRadius: 8, padding: "10px 12px" }}>
+          <summary style={{ fontSize: 12, color: C.accent, fontWeight: 600, cursor: "pointer" }}>📱 顯示 QR Code(給實體印刷)</summary>
+          <div style={{ marginTop: 10, textAlign: "center", padding: "10px 0" }}>
+            <img src={qrUrl} alt="QR Code" style={{ maxWidth: 280, borderRadius: 8, background: "#fff", padding: 8 }}/>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>掃描此 QR 碼開啟商品</div>
+            <a href={qrUrl} download={`qr-${product.name}.png`}
+              style={{ display: "inline-block", marginTop: 8, fontSize: 11, color: C.accent, textDecoration: "none", padding: "4px 12px", border: `1px solid ${C.accent}`, borderRadius: 99 }}>
+              📥 下載 QR 圖檔
+            </a>
+          </div>
+        </details>
+
+        {/* 主要行動按鈕 */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button onClick={copyMessage}
+            style={{ padding: "12px", background: copied ? C.green : C.accent, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            {copied ? "✅ 已複製" : "📋 複製文案"}
+          </button>
+          <button onClick={shareToLine}
+            style={{ padding: "12px", background: "#06C755", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            📤 分享到 LINE
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button onClick={copyUrl}
+            style={{ padding: "10px", background: "#fff", color: C.textMid, border: `1.5px solid ${C.border}`, borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            🔗 僅複製網址
+          </button>
+          <button onClick={nativeShare}
+            style={{ padding: "10px", background: "#fff", color: C.textMid, border: `1.5px solid ${C.border}`, borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            📱 系統分享
+          </button>
+        </div>
+
+        <div style={{ fontSize: 10, color: C.faint, textAlign: "center", padding: "4px 0", lineHeight: 1.6 }}>
+          💡 客人點連結會自動打開商品並可加入購物車<br/>
+          分享到 LINE 官方群組會顯示連結預覽
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── 快速上架 Modal ─────────────────────────────────────────
+// 讓業者拍完照片 + 貼一段文字資料 → 系統自動解析 → 一鍵上架
+function QuickAddModal({ onClose, onSave, defaultRate = 0, toast }) {
+  const [pasteText, setPasteText] = useState("");
+  const [name, setName] = useState("");
+  const [image, setImage] = useState("");
+  const [category, setCategory] = useState("");
+  const [retailPrice, setRetailPrice] = useState("");
+  const [jpyPrice, setJpyPrice] = useState("");   // 日幣原價
+  const [krwPrice, setKrwPrice] = useState("");   // 韓幣原價
+  const [rate, setRate] = useState(String(defaultRate || ""));
+  const [rateType, setRateType] = useState("jpy"); // jpy | krw
+  const [colors, setColors] = useState("");   // 顏色,逗號分隔
+  const [sizes, setSizes] = useState("");     // 尺寸,逗號分隔
+  const [deadline, setDeadline] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // 貼上文字自動解析
+  const parsePasteText = () => {
+    if (!pasteText.trim()) { alert("請先貼上文字"); return; }
+    const t = pasteText;
+    // 解析各欄位(支援全形冒號)
+    const grab = (key) => {
+      const re = new RegExp(`${key}[::]\\s*([^\\n]+)`, "i");
+      const m = t.match(re);
+      return m ? m[1].trim() : "";
+    };
+    const parsed = {
+      name: grab("名稱") || grab("品名") || grab("商品"),
+      retail: grab("零售價") || grab("售價") || grab("價格"),
+      jpy: grab("日幣") || grab("日圓") || grab("¥"),
+      krw: grab("韓幣") || grab("韓元") || grab("₩"),
+      rate: grab("匯率") || grab("成本匯率"),
+      category: grab("分類"),
+      colors: grab("顏色") || grab("色系"),
+      sizes: grab("尺寸") || grab("大小") || grab("規格"),
+      deadline: grab("限時") || grab("收單") || grab("結單") || grab("截止"),
+    };
+    let count = 0;
+    if (parsed.name) { setName(parsed.name); count++; }
+    if (parsed.retail) { setRetailPrice(parsed.retail.replace(/[^\d.]/g, "")); count++; }
+    if (parsed.jpy) { setJpyPrice(parsed.jpy.replace(/[^\d.]/g, "")); count++; }
+    if (parsed.krw) { setKrwPrice(parsed.krw.replace(/[^\d.]/g, "")); count++; }
+    if (parsed.rate) { setRate(parsed.rate.replace(/[^\d.]/g, "")); count++; }
+    if (parsed.category) { setCategory(parsed.category); count++; }
+    if (parsed.colors) { setColors(parsed.colors); count++; }
+    if (parsed.sizes) { setSizes(parsed.sizes); count++; }
+    if (parsed.deadline) { setDeadline(parsed.deadline); count++; }
+    toast?.(count > 0 ? `✅ 已解析 ${count} 個欄位` : "⚠️ 沒解析到任何欄位,請確認格式");
+  };
+
+  // 上傳圖片
+  const onUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert("圖片太大,請小於 5MB"); return; }
+    setUploading(true);
+    try {
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = ev => { img.src = ev.target.result; };
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 600;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          const ratio = MAX / Math.max(width, height);
+          width *= ratio; height *= ratio;
+        }
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        const data = canvas.toDataURL("image/jpeg", 0.82);
+        if (data.length > 2 * 1024 * 1024) {
+          alert("壓縮後仍太大,請換張圖");
+          setUploading(false);
+          return;
+        }
+        setImage(data);
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      alert("上傳失敗:" + err.message);
+      setUploading(false);
+    }
+  };
+
+  // 計算成本
+  const rateNum = Number(rate) || 0;
+  const jpyNum = Number(jpyPrice) || 0;
+  const krwNum = Number(krwPrice) || 0;
+  const computedCost = rateType === "jpy" ? Math.round(jpyNum * rateNum) : Math.round(krwNum * rateNum);
+  const retailNum = Number(retailPrice) || 0;
+  const profit = Math.max(0, retailNum - computedCost);
+
+  // 建立款式(顏色 × 尺寸的組合)
+  const buildVariants = () => {
+    const colorList = colors.split(/[,,、\s]+/).map(s => s.trim()).filter(Boolean);
+    const sizeList = sizes.split(/[,,、\s]+/).map(s => s.trim()).filter(Boolean);
+    if (colorList.length === 0 && sizeList.length === 0) {
+      // 無規格,建一個單一 variant
+      return [{
+        id: secureUid(),
+        name: name || "商品",
+        price: retailNum,
+        cost: computedCost,
+        costJpy: rateType === "jpy" ? jpyNum : 0,
+      }];
+    }
+    if (colorList.length === 0) colorList.push("");
+    if (sizeList.length === 0) sizeList.push("");
+    const variants = [];
+    colorList.forEach(c => {
+      sizeList.forEach(s => {
+        const vName = [c, s].filter(x => x).join(" / ");
+        variants.push({
+          id: secureUid(),
+          name: vName || "單一款式",
+          price: retailNum,
+          cost: computedCost,
+          costJpy: rateType === "jpy" ? jpyNum : 0,
+        });
+      });
+    });
+    return variants;
+  };
+
+  const doSave = async () => {
+    if (!name.trim()) { alert("請填品名"); return; }
+    if (retailNum <= 0) { alert("請填零售價"); return; }
+    setSaving(true);
+    try {
+      const variants = buildVariants();
+      const product = {
+        id: secureUid(),
+        name: name.trim(),
+        category: category.trim() || "快速上架",
+        image: image || "🛒",
+        status: "on",
+        variants,
+        rate: rateNum,
+        deadline: deadline || null,
+        payment_type: "full",
+      };
+      await onSave(product);
+      toast?.(`✅ 已上架「${name}」· ${variants.length} 個款式`);
+      onClose();
+    } catch (e) {
+      alert(`上架失敗:${e.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="⚡ 快速上架" onClose={onClose} wide>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* 貼上文字自動解析區 */}
+        <details style={{ background: C.pinkBg, borderRadius: 10, padding: "12px 14px", border: `1.5px dashed ${C.pinkDark}` }}>
+          <summary style={{ fontSize: 13, fontWeight: 700, color: C.pinkDark, cursor: "pointer" }}>📋 貼上文字自動填入(可選)</summary>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11, color: C.textMid, marginBottom: 6, lineHeight: 1.6 }}>
+              把 LINE 群組的商品文字貼進來,系統會自動填入欄位。
+              支援格式:名稱、價格/零售價、日幣、韓幣、匯率、顏色、尺寸、收單/限時、分類
+            </div>
+            <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows={5}
+              placeholder={"範例:\n名稱:CUPID 天使愛心擺飾\n零售價:1000\n日幣:2500\n匯率:0.22\n顏色:米色, 白色, 紫色\n尺寸:大, 中, 小\n收單:4/20 17:00"}
+              style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, boxSizing: "border-box", background: "#fff", fontFamily: "inherit", resize: "vertical", lineHeight: 1.6 }}/>
+            <button onClick={parsePasteText}
+              style={{ marginTop: 8, padding: "8px 16px", background: C.pinkDark, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              🔍 解析並填入
+            </button>
+          </div>
+        </details>
+
+        {/* 商品照 */}
+        <div>
+          <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 }}>📷 商品照</label>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ width: 100, height: 100, background: C.bgDeep, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", border: `1px dashed ${C.border}`, flexShrink: 0 }}>
+              {image ? (
+                image.startsWith("data:") || image.startsWith("http")
+                  ? <img src={image} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }}/>
+                  : <span style={{ fontSize: 32 }}>{image}</span>
+              ) : (
+                <span style={{ fontSize: 32, opacity: 0.4 }}>📷</span>
+              )}
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: "inline-block", padding: "8px 16px", background: C.accent, color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                {uploading ? "壓縮中..." : image ? "🔄 更換" : "📤 上傳照片"}
+                <input type="file" accept="image/*" onChange={onUpload} style={{ display: "none" }}/>
+              </label>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>或輸入 emoji:</div>
+              <input type="text" value={image?.startsWith("data:") || image?.startsWith("http") ? "" : image}
+                onChange={e => setImage(e.target.value)}
+                placeholder="🛒 🎀 💎"
+                maxLength={4}
+                style={{ marginTop: 4, width: 80, padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 16, boxSizing: "border-box", textAlign: "center" }}/>
+            </div>
+          </div>
+        </div>
+
+        {/* 品名 + 分類 */}
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 4 }}>品名 *</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)}
+              placeholder="CUPID 天使愛心擺飾"
+              style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 4 }}>分類</label>
+            <input type="text" value={category} onChange={e => setCategory(e.target.value)}
+              placeholder="居家擺飾"
+              style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+        </div>
+
+        {/* 價格區 */}
+        <div style={{ background: C.bgDeep, borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ fontSize: 12, color: C.accent, fontWeight: 700, marginBottom: 10 }}>💰 價格資訊</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>零售價 NT$ *</label>
+              <input type="number" inputMode="numeric" value={retailPrice} onChange={e => setRetailPrice(e.target.value)}
+                placeholder="1000"
+                style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#fff" }}/>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>成本 NT$ <span style={{ color: C.faint, fontWeight: 400 }}>(自動)</span></label>
+              <div style={{ padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#f5efec", color: C.green, fontWeight: 700 }}>
+                NT$ {computedCost.toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>💴 日幣原價 ¥</label>
+              <input type="number" inputMode="numeric" value={jpyPrice} onChange={e => { setJpyPrice(e.target.value); setRateType("jpy"); }}
+                placeholder="2500"
+                style={{ width: "100%", padding: "9px 12px", border: `1.5px solid ${rateType === "jpy" && jpyNum > 0 ? C.accent : C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#fff" }}/>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>💵 韓幣原價 ₩</label>
+              <input type="number" inputMode="numeric" value={krwPrice} onChange={e => { setKrwPrice(e.target.value); setRateType("krw"); }}
+                placeholder="30000"
+                style={{ width: "100%", padding: "9px 12px", border: `1.5px solid ${rateType === "krw" && krwNum > 0 ? C.accent : C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#fff" }}/>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>💱 成本匯率 (× {rateType === "jpy" ? "¥1" : "₩1"} = NT$)</label>
+            <input type="number" step="0.001" value={rate} onChange={e => setRate(e.target.value)}
+              placeholder="0.22"
+              style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#fff" }}/>
+          </div>
+
+          {retailNum > 0 && computedCost > 0 && (
+            <div style={{ marginTop: 10, padding: "8px 12px", background: profit > 0 ? C.greenBg : C.redBg, borderRadius: 6, fontSize: 12, display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: C.muted }}>預估利潤(單件)</span>
+              <span style={{ color: profit > 0 ? C.greenDark : C.red, fontWeight: 700 }}>{profit > 0 ? "+" : ""} NT$ {profit.toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+
+        {/* 規格 */}
+        <div style={{ background: C.bgDeep, borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ fontSize: 12, color: C.accent, fontWeight: 700, marginBottom: 8 }}>📐 規格 <span style={{ color: C.faint, fontWeight: 400 }}>(留空=單一款式)</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>顏色 <span style={{ color: C.faint, fontWeight: 400 }}>(逗號分隔)</span></label>
+              <input type="text" value={colors} onChange={e => setColors(e.target.value)}
+                placeholder="米色, 白色, 紫色"
+                style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#fff" }}/>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: C.muted, fontWeight: 500, display: "block", marginBottom: 4 }}>尺寸 <span style={{ color: C.faint, fontWeight: 400 }}>(逗號分隔)</span></label>
+              <input type="text" value={sizes} onChange={e => setSizes(e.target.value)}
+                placeholder="大, 中, 小"
+                style={{ width: "100%", padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", background: "#fff" }}/>
+            </div>
+          </div>
+          {(() => {
+            const colorList = colors.split(/[,,、\s]+/).map(s => s.trim()).filter(Boolean);
+            const sizeList = sizes.split(/[,,、\s]+/).map(s => s.trim()).filter(Boolean);
+            const total = Math.max(1, colorList.length || 1) * Math.max(1, sizeList.length || 1);
+            if (total > 1) return (
+              <div style={{ marginTop: 8, fontSize: 11, color: C.muted, padding: "6px 10px", background: "#fff", borderRadius: 6 }}>
+                💡 將建立 <strong style={{ color: C.accent }}>{total}</strong> 個款式組合
+              </div>
+            );
+            return null;
+          })()}
+        </div>
+
+        {/* 收單時間 */}
+        <div>
+          <label style={{ fontSize: 12, color: C.muted, fontWeight: 600, display: "block", marginBottom: 4 }}>⏰ 收單時間 <span style={{ color: C.faint, fontWeight: 400 }}>(可選,例:4/20 17:00)</span></label>
+          <input type="text" value={deadline} onChange={e => setDeadline(e.target.value)}
+            placeholder="4/20 17:00 或 2026-04-20"
+            style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}/>
+        </div>
+
+        {/* 動作按鈕 */}
+        <div style={{ display: "flex", gap: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+          <Btn variant="ghost" onClick={onClose} style={{ flex: 1 }}>取消</Btn>
+          <button onClick={doSave} disabled={saving || !name.trim() || retailNum <= 0}
+            style={{ flex: 2, padding: "12px 20px", background: (saving || !name.trim() || retailNum <= 0) ? C.faint : `linear-gradient(135deg, ${C.pinkDark} 0%, ${C.accent} 100%)`, color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (saving || !name.trim() || retailNum <= 0) ? "not-allowed" : "pointer" }}>
+            {saving ? "上架中..." : "⚡ 立即上架"}
+          </button>
+        </div>
+
+        <div style={{ fontSize: 10, color: C.faint, textAlign: "center", lineHeight: 1.6 }}>
+          上架後可到「賣場管理」按「編輯」補充更多細節<br/>
+          分享商品可用商品卡的「🔗 分享」按鈕
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function CatalogPage({ data, setData, toast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [sharing, setSharing] = useState(null); // 要分享的商品
+  const [showQuickAdd, setShowQuickAdd] = useState(false); // 快速上架
 
   const toggle = async (id) => {
     const p = data.products.find(x => x.id === id);
@@ -1900,7 +2477,13 @@ function CatalogPage({ data, setData, toast }) {
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>賣場管理</div>
-        <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
+        <div style={{ display:"flex", gap:6 }}>
+          <button onClick={() => setShowQuickAdd(true)}
+            style={{ background:`linear-gradient(135deg, ${C.pinkDark} 0%, ${C.accent} 100%)`, color:"#fff", border:"none", padding:"8px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", boxShadow:"0 2px 6px rgba(168,132,126,.3)" }}>
+            ⚡ 快速上架
+          </button>
+          <Btn sm onClick={() => setShowAdd(true)}>＋ 新增商品</Btn>
+        </div>
       </div>
 
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -1957,6 +2540,10 @@ function CatalogPage({ data, setData, toast }) {
               {/* 底部操作列 */}
               <div style={{ display:"flex", gap:6, padding:"8px 14px 12px", borderTop:`0.5px dashed ${C.border}` }}>
                 <Btn sm variant="soft" icon="edit" onClick={() => setEditing(p)} style={{ flex:1 }}>編輯</Btn>
+                <button onClick={() => setSharing(p)}
+                  style={{ background:C.accentBg, border:`1px solid ${C.accent}`, borderRadius:10, padding:"7px 12px", cursor:"pointer", color:C.accent, display:"flex", alignItems:"center", justifyContent:"center", gap:4, fontSize:12, fontWeight:600 }}>
+                  🔗 分享
+                </button>
                 <Btn sm variant="ghost" icon={p.status==="on"?"eye-off":"eye"} onClick={() => toggle(p.id)} style={{ flex:1 }}>{p.status==="on"?"下架":"上架"}</Btn>
                 <button onClick={() => del(p.id)}
                   style={{ background:"none", border:`0.5px solid ${C.border}`, borderRadius:10, padding:"7px 12px", cursor:"pointer", color:C.red, display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -1970,39 +2557,16 @@ function CatalogPage({ data, setData, toast }) {
 
       {showAdd && <ProductModal onSave={saveNew} onClose={() => setShowAdd(false)} rate={data.rate} />}
       {editing && <ProductModal product={editing} onSave={saveEdit} onClose={() => setEditing(null)} rate={data.rate} />}
+      {sharing && <ShareProductModal product={sharing} onClose={() => setSharing(null)} toast={toast} />}
+      {showQuickAdd && <QuickAddModal onClose={() => setShowQuickAdd(false)} onSave={saveNew} defaultRate={data.rate} toast={toast} />}
     </div>
   );
 }
 
 function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const isEdit = !!product;
-  // 客人端 LIFF URL(改成你自己的)
-  const CUSTOMER_LIFF_URL = "https://liff.line.me/2009872512-JJAaJ7Bi";
+  const [showShare, setShowShare] = useState(false);
 
-  const shareProduct = async () => {
-    if (!product) return;
-    const shareData = {
-      title: product.name || "分享商品",
-      text: `🛍 ${product.name}\n\n點連結加入我的購物車!`,
-      url: `${CUSTOMER_LIFF_URL}?product=${encodeURIComponent(product.id)}`,
-    };
-    try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-      } else {
-        // fallback:複製到剪貼簿
-        await navigator.clipboard.writeText(`${shareData.text}\n${shareData.url}`);
-        alert("✅ 分享連結已複製到剪貼簿");
-      }
-    } catch (e) {
-      if (e.name !== "AbortError") {
-        // 用戶取消分享不算錯
-        console.error(e);
-        // 最後 fallback:提示手動複製
-        window.prompt("請複製此連結分享:", `${shareData.text}\n${shareData.url}`);
-      }
-    }
-  };
 
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
@@ -2088,9 +2652,9 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                 <div style={{ fontSize: 12, color: C.accentDark, fontWeight: 700, marginBottom: 3 }}>🔗 分享商品連結</div>
                 <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.5 }}>分享到 LINE / IG / FB,客人點連結直接進購物頁</div>
               </div>
-              <button type="button" onClick={shareProduct}
+              <button type="button" onClick={() => setShowShare(true)}
                 style={{ background: C.accent, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                <Icon name="share" size={14} /> 分享連結
+                <Icon name="share" size={14} /> 完整分享
               </button>
             </div>
           </div>
@@ -2334,6 +2898,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
           <Btn onClick={save}>{isEdit ? "儲存" : "新增商品"}</Btn>
         </div>
       </div>
+      {showShare && product && <ShareProductModal product={product} onClose={() => setShowShare(false)} toast={t => alert(t)} />}
     </Modal>
   );
 }
@@ -3121,303 +3686,8 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
 }
 
 // 入庫配貨:列出「已採買」但尚未入庫的品項聚合,讓業者登記買到多少
-function InboundPage({ data, setData, toast, setTab }) {
-  // 從所有未封存/未取消訂單的 items 掃描:purchased=true 且未配完的品項
-  const validOrders = data.orders.filter(o => !o.archived && o.status !== "cancelled");
-  const groups = new Map();
-  validOrders.forEach(o => {
-    (o.items || []).forEach((it, itemIdx) => {
-      if (!it.purchased) return;             // 未採買不列
-      if (it.stocked === true) return;       // 舊資料:整批配完
-      const stockedQty = Number(it.stocked_qty) || 0;
-      const qty = Number(it.qty) || 1;
-      const need = qty - stockedQty;
-      if (need <= 0) return;                 // 已配完
-      const parts = String(it.name).split(" / ");
-      const productName = parts[0] || it.name;
-      const variantName = parts.slice(1).join(" / ") || "(單一款式)";
-      const key = `${productName}|||${variantName}`;
-      if (!groups.has(key)) groups.set(key, { productName, variantName, needed: 0, orderRefs: [] });
-      const g = groups.get(key);
-      g.needed += need;
-      g.orderRefs.push({
-        orderId: o.id,
-        orderNo: o.no,
-        customer: o.customer_name || "未名",
-        qty: need,           // 只算未配的數量
-        itemIdx,
-        alreadyStockedQty: stockedQty,
-      });
-    });
-  });
-  const groupList = Array.from(groups.values());
+// InboundPage 已廢除,配貨改由「進項紀錄」的 PurchaseModal 處理
 
-  // 每個款式業者要輸入「實際買到」
-  const [bought, setBought] = useState({});
-  const setB = (key, val) => setBought(prev => ({ ...prev, [key]: val }));
-
-  const doInboundAll = async () => {
-    if (groupList.length === 0) { toast("沒有可入庫的款式"); return; }
-
-    // 過濾出「實際買到 > 0」的款式,數量 0 直接跳過
-    const activeGroups = groupList.filter(g => {
-      const key = `${g.productName}|||${g.variantName}`;
-      const actualCount = Number(bought[key] ?? g.needed);
-      return actualCount > 0;
-    });
-    const skippedCount = groupList.length - activeGroups.length;
-
-    if (activeGroups.length === 0) {
-      toast("所有款式都填 0,沒有可入庫的項目");
-      return;
-    }
-
-    const confirmMsg = skippedCount > 0
-      ? `確定入庫 ${activeGroups.length} 個款式?(${skippedCount} 個因數量 0 跳過)\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。\n實際買到的總量會全部記入現貨/庫存,方便追蹤採買紀錄。`
-      : `確定入庫 ${activeGroups.length} 個款式?\n\n按訂單先來後到順序配貨,數量不足的品項留在配貨清單。\n實際買到的總量會全部記入現貨/庫存,方便追蹤採買紀錄。`;
-    if (!window.confirm(confirmMsg)) return;
-
-    let stockCount = 0;
-    let processedCount = 0;
-    let allocatedItemCount = 0;   // 有配到貨的品項數(有增量的)
-    let allocatedUnitsCount = 0;  // 配到的貨物總件數
-    let unallocatedUnitsCount = 0; // 沒配到的貨物件數(缺量)
-
-    // 收集:每筆訂單要更新的品項 idx → 新的 stocked_qty (原有 + 新配)
-    const itemsToUpdate = new Map(); // orderId → Map(itemIdx → newStockedQty)
-    const setNewStockedQty = (orderId, itemIdx, newQty) => {
-      if (!itemsToUpdate.has(orderId)) itemsToUpdate.set(orderId, new Map());
-      itemsToUpdate.get(orderId).set(itemIdx, newQty);
-    };
-
-    for (const g of activeGroups) {
-      const key = `${g.productName}|||${g.variantName}`;
-      const actualBought = Number(bought[key] ?? g.needed);
-      let remaining = actualBought;
-      const displayName = `${g.productName}${g.variantName !== "(單一款式)" ? ` / ${g.variantName}` : ""}`;
-
-      // 按 orderRefs 順序配貨(先來後到)
-      const sortedRefs = [...g.orderRefs].sort((a, b) => String(a.orderNo).localeCompare(String(b.orderNo)));
-
-      for (const r of sortedRefs) {
-        if (remaining <= 0) {
-          unallocatedUnitsCount += r.qty;
-          continue;
-        }
-        const need = Number(r.qty) || 1;
-        const alloc = Math.min(remaining, need);   // 配到多少(能配多少配多少)
-        if (alloc > 0) {
-          const alreadyStocked = Number(r.alreadyStockedQty) || 0;
-          setNewStockedQty(r.orderId, r.itemIdx, alreadyStocked + alloc);
-          remaining -= alloc;
-          allocatedUnitsCount += alloc;
-          allocatedItemCount++;
-        }
-        if (alloc < need) {
-          unallocatedUnitsCount += (need - alloc);
-        }
-      }
-
-      // in_stock 記錄兩個數字 (加錯誤處理讓失敗直接告訴業者)
-      try {
-        const { data: existing, error: selErr } = await supabase.from("in_stock")
-          .select("*").eq("name", displayName).maybeSingle();
-        if (selErr) {
-          console.error("in_stock 查詢失敗:", selErr);
-          alert(`⚠️ in_stock 查詢失敗:\n${selErr.message}`);
-        }
-
-        if (existing) {
-          const newTotal = (Number(existing.total_purchased) || 0) + actualBought;
-          const newStock = (Number(existing.stock) || 0) + actualBought;   // 全部加,配貨不減庫存
-          const { error: updErr } = await supabase.from("in_stock").update({
-            total_purchased: newTotal,
-            stock: newStock,
-            updated_at: new Date().toISOString()
-          }).eq("id", existing.id);
-          if (updErr) {
-            console.error("in_stock 更新失敗:", updErr);
-            if (updErr.message && /total_purchased/.test(updErr.message)) {
-              const retry = await supabase.from("in_stock").update({
-                stock: newStock, updated_at: new Date().toISOString()
-              }).eq("id", existing.id);
-              if (retry.error) alert(`⚠️ in_stock 更新失敗:\n${retry.error.message}`);
-              else console.warn("total_purchased 欄位不存在,僅更新 stock");
-            } else {
-              alert(`⚠️ in_stock 更新失敗:\n${updErr.message}`);
-            }
-          }
-        } else {
-          const newItem = {
-            id: secureUid(),
-            name: displayName,
-            price: 0,
-            stock: actualBought,           // 全部進庫存
-            total_purchased: actualBought,
-            image: "",
-            status: "off",
-            created_at: new Date().toISOString(),
-          };
-          console.log("嘗試建立 in_stock:", newItem);
-          const { error: insErr, data: insData } = await supabase.from("in_stock").insert([newItem]).select();
-          if (insErr) {
-            console.error("in_stock 建立失敗:", insErr);
-            // fallback:沒 total_purchased 欄位就拿掉
-            if (insErr.message && /total_purchased/.test(insErr.message)) {
-              const retry = await supabase.from("in_stock").insert([{
-                id: secureUid(), name: displayName, price: 0, stock: actualBought,
-                image: "", status: "off", created_at: new Date().toISOString(),
-              }]).select();
-              if (retry.error) alert(`⚠️ in_stock 建立失敗:\n${retry.error.message}`);
-              else console.warn("total_purchased 欄位不存在,僅存 stock");
-            } else {
-              alert(`⚠️ in_stock 建立失敗:\n${insErr.message}\n\n可能原因:\n1. in_stock 表 RLS 阻擋 insert\n2. 欄位型別不符\n3. 必填欄位缺失`);
-            }
-          } else {
-            console.log("✅ in_stock 建立成功:", insData);
-          }
-        }
-      } catch (e) {
-        console.error("in_stock 例外:", e);
-        alert(`⚠️ in_stock 例外:\n${e.message || e}`);
-      }
-      stockCount += remaining;
-      processedCount++;
-    }
-
-    // 應用品項 stocked_qty 到訂單
-    const now = new Date().toISOString();
-    let allStockedCount = 0;   // 全部品項都配完的訂單數
-    for (const [orderId, itemIdxToNewQty] of itemsToUpdate.entries()) {
-      const order = data.orders.find(o => o.id === orderId);
-      if (!order) continue;
-      const newItems = (order.items || []).map((it, i) => {
-        if (!itemIdxToNewQty.has(i)) return it;
-        const newStockedQty = itemIdxToNewQty.get(i);
-        const qty = Number(it.qty) || 1;
-        return {
-          ...it,
-          stocked_qty: newStockedQty,
-          stocked: newStockedQty >= qty,       // 相容舊格式
-          stocked_at: now,
-        };
-      });
-      // 判斷所有品項都配完 (舊格式 stocked===true 或新格式 stocked_qty >= qty)
-      const allStocked = newItems.every(it => {
-        const q = Number(it.qty) || 1;
-        const sq = Number(it.stocked_qty) || (it.stocked ? q : 0);
-        return sq >= q;
-      });
-      const patch = { items: newItems, updated_at: now };
-      if (allStocked && order.status === "pending") {
-        patch.status = "bought";
-        patch.stocked = true;
-        patch.stocked_at = now;
-        allStockedCount++;
-      }
-      let { error } = await supabase.from("orders").update(patch).eq("id", orderId);
-      if (error) {
-        console.warn(`訂單 #${order.no} 更新失敗:`, error.message);
-        if (error.message && /stocked/.test(error.message)) {
-          const { stocked, stocked_at, ...patchNoStocked } = patch;
-          const retry = await supabase.from("orders").update(patchNoStocked).eq("id", orderId);
-          if (retry.error) { console.warn("retry 也失敗:", retry.error); continue; }
-          console.warn("orders 沒 stocked 欄位,已改用不含 stocked 的 patch");
-        } else {
-          continue;
-        }
-      }
-      setData(d => ({
-        ...d,
-        orders: d.orders.map(x => x.id === orderId ? {
-          ...x, items: newItems,
-          ...(patch.status ? { status: patch.status } : {}),
-          ...(patch.stocked ? { stocked: true, stocked_at: now } : {})
-        } : x)
-      }));
-    }
-
-    // 重新拉現貨資料
-    const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
-    setData(d => ({ ...d, inStock: inStockRes.data || d.inStock }));
-
-    logAction("批次入庫", `${processedCount} 款 · 配 ${allocatedUnitsCount} 件${stockCount > 0 ? ` · 入庫 ${stockCount}` : ""}${skippedCount > 0 ? ` · 跳過 ${skippedCount}`:""}`);
-    toast(`✅ 已配貨 ${allocatedUnitsCount} 件${stockCount > 0 ? ` · ${stockCount} 件記入庫存` : ""}${allStockedCount > 0 ? ` · ${allStockedCount} 筆訂單完成` : ""}${unallocatedUnitsCount > 0 ? ` · ⚠️ ${unallocatedUnitsCount} 件缺量待補` : ""}`);
-    setBought({});
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark }}>📦 入庫配貨</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-            填「實際買到」數量,一鍵配貨並自動入庫
-          </div>
-        </div>
-      </div>
-
-      {groupList.length === 0 ? (
-        <Card style={{ padding: "48px 20px", textAlign: "center" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
-          <div style={{ fontSize: 14, color: C.muted, marginBottom: 4 }}>沒有已採買的商品可入庫</div>
-          <div style={{ fontSize: 11, color: C.faint }}>先去採購清單標記「已採買」</div>
-          <button onClick={() => setTab("purchase")}
-            style={{ marginTop: 16, background: C.accent, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 10, fontSize: 13, cursor: "pointer" }}>
-            前往採購清單
-          </button>
-        </Card>
-      ) : (
-        <>
-          {groupList.map((g, i) => {
-            const key = `${g.productName}|||${g.variantName}`;
-            const actual = bought[key] ?? g.needed;
-            const extra = Number(actual) - g.needed;
-            return (
-              <Card key={i} style={{ padding: 14 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{g.productName}</div>
-                <div style={{ fontSize: 12, color: C.accent, marginTop: 2, fontWeight: 500 }}>{g.variantName}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, padding: "10px", background: C.bgDeep, borderRadius: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: C.muted }}>需求</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: C.textMid }}>{g.needed} 件</div>
-                  </div>
-                  <div style={{ fontSize: 16, color: C.faint }}>→</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: C.muted }}>實際買到</div>
-                    <input type="number" inputMode="numeric" min="0" value={actual}
-                      onChange={e => setB(key, e.target.value)}
-                      style={{ width: "100%", padding: "5px 8px", fontSize: 16, fontWeight: 700, color: C.accentDark, border: `1.5px solid ${C.accent}`, borderRadius: 6, background: "#fff", boxSizing: "border-box" }}/>
-                  </div>
-                  <div style={{ flex: 1, textAlign: "right" }}>
-                    {Number(actual) === 0 ? (
-                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>⊘ 跳過</div>
-                    ) : extra > 0 ? (
-                      <div style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>✨ +{extra} 入庫</div>
-                    ) : extra < 0 ? (
-                      <div style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>⚠️ 缺 {-extra}</div>
-                    ) : (
-                      <div style={{ fontSize: 11, color: C.muted }}>剛好</div>
-                    )}
-                  </div>
-                </div>
-                <div style={{ fontSize: 10, color: C.faint, marginTop: 6 }}>
-                  {g.orderRefs.map(r => `#${r.orderNo} ${r.customer}×${r.qty}`).join(" · ")}
-                </div>
-              </Card>
-            );
-          })}
-          <button onClick={doInboundAll}
-            style={{ background: C.green, color: "#fff", border: "none", padding: "14px", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer", position: "sticky", bottom: 12 }}>
-            ✓ 確認入庫並配貨
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-// 營收報表:全部歷史合計 + 時間篩選 + 趨勢圖 + 排行 + 匯出
 function RevenuePage({ data }) {
   const [range, setRange] = useState("all"); // today / week / month / all / custom
   const [customStart, setCustomStart] = useState("");
@@ -3443,7 +3713,7 @@ function RevenuePage({ data }) {
     return true; // all
   };
 
-  const allOrders = (data.orders || []).filter(inRange);
+  const allOrders = (data.orders || []).filter(o => !o.archived).filter(inRange);
 
   // === 總體統計 ===
   const totalRevenue = allOrders.reduce((s, o) => s + (Number(o.total) || 0), 0);
