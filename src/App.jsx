@@ -235,6 +235,51 @@ const hashPassword = async (pw) => {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
 };
 
+// ─── 圖片壓縮 + 上傳到 Supabase Storage ─────────────────
+// 傳 File 進來,回傳 public URL(不再存 base64,大幅省 Egress)
+const compressAndUploadImage = async (file, maxDim = 800) => {
+  if (!file) throw new Error("no file");
+  if (file.size > 5 * 1024 * 1024) throw new Error("圖片太大,請小於 5MB");
+
+  // Step 1: 壓縮
+  const compressedBlob = await new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = ev => { img.src = ev.target.result; };
+    reader.onerror = () => reject(new Error("讀檔失敗"));
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const ratio = maxDim / Math.max(width, height);
+        width *= ratio; height *= ratio;
+      }
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error("壓縮失敗")), "image/jpeg", 0.82);
+    };
+    img.onerror = () => reject(new Error("圖檔損壞"));
+    reader.readAsDataURL(file);
+  });
+
+  // Step 2: 上傳到 Supabase Storage
+  const fileName = `${Date.now()}_${secureUid()}.jpg`;
+  const { error: upErr } = await supabase.storage
+    .from("product-images")
+    .upload(fileName, compressedBlob, {
+      contentType: "image/jpeg",
+      upsert: false,
+    });
+  if (upErr) throw new Error(`上傳失敗:${upErr.message}`);
+
+  // Step 3: 取得 public URL
+  const { data: urlData } = supabase.storage
+    .from("product-images")
+    .getPublicUrl(fileName);
+  return urlData.publicUrl;
+};
+
 // Simple XSS sanitizer — strips HTML tags from user input
 const sanitize = (str) => String(str).replace(/<[^>]*>/g, "").replace(/[<>"'`]/g, "").trim();
 
@@ -617,10 +662,10 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         }
       });
 
-    // 心跳輪詢備援:每 30 秒重拉一次,防止 Realtime 漏接
+    // 心跳輪詢備援:每 90 秒重拉一次,防止 Realtime 漏接(降低頻率省 Egress)
     const heartbeat = setInterval(() => {
       reloadData();
-    }, 30000);
+    }, 90000);
 
     return () => {
       sub.unsubscribe();
@@ -760,7 +805,7 @@ function AdminDashboard({ data, setData, credentials, setCredentials, onLogout }
         {tab === "revenue"       && <RevenuePage       data={data} />}
         {tab === "wishlist"      && <WishlistPage      data={data} setData={setData} toast={showToast} />}
         {tab === "customers"     && <CustomersPage     data={data} setData={setData} toast={showToast} sendLineNotify={sendLineNotify} />}
-        {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} />}
+        {tab === "settings"      && <SettingsPage      credentials={credentials} setCredentials={setCredentials} toast={showToast} onLogout={onLogout} data={data} setData={setData} />}
         {tab === "archive"       && <ArchivePage       data={data} setData={setData} toast={showToast} />}
         {tab === "auditlog"      && <AuditLogPage />}
         {tab === "more"          && <MorePage tabs={TABS_MORE} onSelect={setTab} onLogout={onLogout} credentials={credentials} reloadData={reloadData} toast={showToast} />}
@@ -1537,27 +1582,15 @@ function AddOrderModal({ data, setData, onClose, toast }) {
   ]);
 
   // 圖片壓縮+轉 base64
-  const handleImagePick = (itId, file) => {
+  const handleImagePick = async (itId, file) => {
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) { alert("圖片不能超過 2MB"); return; }
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const img = new Image();
-      img.onload = () => {
-        // 壓縮成最長邊 600px
-        const canvas = document.createElement("canvas");
-        const max = 600;
-        let w = img.width, h = img.height;
-        if (w > h && w > max) { h = h * max / w; w = max; }
-        else if (h > max) { w = w * max / h; h = max; }
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        const data = canvas.toDataURL("image/jpeg", 0.82);
-        updateItem(itId, "image", data);
-      };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
+    try {
+      const url = await compressAndUploadImage(file, 600);
+      updateItem(itId, "image", url);
+    } catch (err) {
+      alert(err.message || "圖片上傳失敗");
+    }
   };
 
   // 搜尋過濾
@@ -2144,35 +2177,13 @@ function QuickAddModal({ onClose, onSave, defaultRate = 0, toast }) {
   const onUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("圖片太大,請小於 5MB"); return; }
     setUploading(true);
     try {
-      const img = new Image();
-      const reader = new FileReader();
-      reader.onload = ev => { img.src = ev.target.result; };
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX = 600;
-        let { width, height } = img;
-        if (width > MAX || height > MAX) {
-          const ratio = MAX / Math.max(width, height);
-          width *= ratio; height *= ratio;
-        }
-        canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        const data = canvas.toDataURL("image/jpeg", 0.82);
-        if (data.length > 2 * 1024 * 1024) {
-          alert("壓縮後仍太大,請換張圖");
-          setUploading(false);
-          return;
-        }
-        setImage(data);
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
+      const url = await compressAndUploadImage(file, 800);
+      setImage(url);
     } catch (err) {
-      alert("上傳失敗:" + err.message);
+      alert(err.message || "圖片上傳失敗");
+    } finally {
       setUploading(false);
     }
   };
@@ -2593,18 +2604,19 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   // 本商品匯率(留空時用 0)
   const effectiveRate = Number(productRate) || 0;
 
-  const handleImageFile = (e) => {
+  const handleImageFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { alert("圖片不能超過 2MB"); return; }
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setImage(ev.target.result); // base64 data URL
+    try {
+      const url = await compressAndUploadImage(file, 800);
+      setImage(url);
       setImgMode("file");
+    } catch (err) {
+      alert(err.message || "圖片上傳失敗");
+    } finally {
       setUploading(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const addVariant = () => {
@@ -5407,12 +5419,120 @@ function AuditLogPage() {
   );
 }
 
-function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
+function SettingsPage({ credentials, setCredentials, toast, onLogout, data, setData }) {
   const [account, setAccount] = useState(credentials.account);
   const [oldPw, setOldPw] = useState(""); const [newPw, setNewPw] = useState(""); const [confirmPw, setConfirmPw] = useState("");
   const [showOld, setShowOld] = useState(false); const [showNew, setShowNew] = useState(false);
   const [error, setError] = useState("");
   const [strength, setStrength] = useState(0); // 0-4
+
+  // 圖片遷移狀態
+  const [migrating, setMigrating] = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState({ current: 0, total: 0, done: 0, failed: 0, skipped: 0 });
+  const [migrateLog, setMigrateLog] = useState([]);
+
+  // 統計 base64 圖片
+  const base64Products = (data?.products || []).filter(p => p.image?.startsWith("data:"));
+  const base64InStock = (data?.inStock || []).filter(x => x.image?.startsWith("data:"));
+  const totalBase64Count = base64Products.length + base64InStock.length;
+  const base64Size = (() => {
+    let bytes = 0;
+    [...base64Products, ...base64InStock].forEach(p => { bytes += (p.image?.length || 0); });
+    return (bytes / 1024 / 1024).toFixed(1);
+  })();
+
+  // 一鍵遷移
+  const migrateImages = async () => {
+    if (totalBase64Count === 0) { toast("沒有需要遷移的圖片"); return; }
+    if (!window.confirm(`將把 ${totalBase64Count} 張 base64 圖片轉存到 Supabase Storage,\n\n預計省 ${base64Size} MB 的 Egress。\n\n這會花幾分鐘,途中請不要關頁面。確定?`)) return;
+
+    setMigrating(true);
+    setMigrateLog([]);
+    const items = [
+      ...base64Products.map(p => ({ ...p, _table: "products" })),
+      ...base64InStock.map(p => ({ ...p, _table: "in_stock" })),
+    ];
+    setMigrateProgress({ current: 0, total: items.length, done: 0, failed: 0, skipped: 0 });
+
+    let done = 0, failed = 0, skipped = 0;
+    const logLines = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      setMigrateProgress(p => ({ ...p, current: i + 1 }));
+      try {
+        // 1. base64 → Blob
+        const dataUrl = item.image;
+        const [meta, b64] = dataUrl.split(",");
+        const mime = meta.match(/data:([^;]+)/)?.[1] || "image/jpeg";
+        const bytes = atob(b64);
+        const arr = new Uint8Array(bytes.length);
+        for (let j = 0; j < bytes.length; j++) arr[j] = bytes.charCodeAt(j);
+        const blob = new Blob([arr], { type: mime });
+
+        if (blob.size > 5 * 1024 * 1024) {
+          skipped++;
+          logLines.push(`⏭ 跳過 ${item.name} (超過 5MB)`);
+          setMigrateLog([...logLines]);
+          continue;
+        }
+
+        // 2. 上傳到 Storage
+        const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+        const fileName = `migrated_${Date.now()}_${secureUid()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("product-images")
+          .upload(fileName, blob, { contentType: mime, upsert: false });
+
+        if (upErr) {
+          failed++;
+          logLines.push(`❌ ${item.name}: ${upErr.message}`);
+          setMigrateLog([...logLines]);
+          continue;
+        }
+
+        // 3. 拿 URL
+        const { data: urlData } = supabase.storage
+          .from("product-images")
+          .getPublicUrl(fileName);
+        const publicUrl = urlData.publicUrl;
+
+        // 4. 更新資料庫
+        const { error: dbErr } = await supabase.from(item._table)
+          .update({ image: publicUrl })
+          .eq("id", item.id);
+
+        if (dbErr) {
+          failed++;
+          logLines.push(`❌ ${item.name}: 更新失敗 ${dbErr.message}`);
+          setMigrateLog([...logLines]);
+          continue;
+        }
+
+        // 5. 更新本地 state
+        setData(d => ({
+          ...d,
+          [item._table === "products" ? "products" : "inStock"]:
+            (d[item._table === "products" ? "products" : "inStock"] || [])
+              .map(x => x.id === item.id ? { ...x, image: publicUrl } : x),
+        }));
+
+        done++;
+        setMigrateProgress(p => ({ ...p, done }));
+        logLines.push(`✅ ${item.name}`);
+        setMigrateLog([...logLines]);
+      } catch (e) {
+        failed++;
+        logLines.push(`❌ ${item.name}: ${e.message || e}`);
+        setMigrateLog([...logLines]);
+      }
+    }
+
+    setMigrateProgress(p => ({ ...p, done, failed, skipped }));
+    setMigrating(false);
+    logAction("圖片遷移", `完成 ${done} · 失敗 ${failed} · 跳過 ${skipped}`);
+    toast(`✅ 遷移完成 · 成功 ${done}${failed > 0 ? ` · 失敗 ${failed}` : ""}${skipped > 0 ? ` · 跳過 ${skipped}` : ""}`);
+  };
 
   // 賣貨便連結 state
   const [shopeeUrl, setShopeeUrl] = useState("");
@@ -5576,6 +5696,86 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout }) {
             {cancelSaving ? "儲存中..." : "儲存時數"}
           </Btn>
         </div>
+      </Card>
+
+      {/* 🖼 圖片遷移工具 */}
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark, marginTop: 4 }}>🖼 圖片遷移工具</div>
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.7 }}>
+          把舊的商品圖(存在資料庫的 base64)轉移到 Supabase Storage,大幅降低 Egress 流量消耗。
+        </div>
+
+        {totalBase64Count === 0 && !migrating ? (
+          <div style={{ padding: "20px", background: C.greenBg, borderRadius: 10, textAlign: "center" }}>
+            <div style={{ fontSize: 32, marginBottom: 6 }}>✅</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.greenDark }}>所有圖片都已使用 Storage</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>不需要遷移</div>
+          </div>
+        ) : (
+          <>
+            {/* 統計 */}
+            {!migrating && (
+              <div style={{ padding: "14px 16px", background: C.pinkBg, borderRadius: 10, marginBottom: 12, border: `1.5px solid ${C.pinkDark}40` }}>
+                <div style={{ fontSize: 12, color: C.pinkDark, fontWeight: 700, marginBottom: 8 }}>📊 待遷移統計</div>
+                <div style={{ display: "flex", gap: 20, fontSize: 12, color: C.textMid, flexWrap: "wrap" }}>
+                  <div>
+                    <span style={{ color: C.muted }}>商品圖:</span>
+                    <span style={{ fontWeight: 700, color: C.pinkDark, marginLeft: 4 }}>{base64Products.length} 張</span>
+                  </div>
+                  <div>
+                    <span style={{ color: C.muted }}>現貨圖:</span>
+                    <span style={{ fontWeight: 700, color: C.pinkDark, marginLeft: 4 }}>{base64InStock.length} 張</span>
+                  </div>
+                  <div>
+                    <span style={{ color: C.muted }}>總大小:</span>
+                    <span style={{ fontWeight: 700, color: C.pinkDark, marginLeft: 4 }}>{base64Size} MB</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 進度 */}
+            {migrating && (
+              <div style={{ padding: "14px 16px", background: C.accentBg, borderRadius: 10, marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.accentDark }}>
+                    處理中 {migrateProgress.current} / {migrateProgress.total}
+                  </span>
+                  <span style={{ fontSize: 11, color: C.muted }}>
+                    ✅ {migrateProgress.done}  ❌ {migrateProgress.failed}  ⏭ {migrateProgress.skipped}
+                  </span>
+                </div>
+                <div style={{ height: 8, background: "#fff", borderRadius: 99, overflow: "hidden" }}>
+                  <div style={{ width: `${(migrateProgress.current / Math.max(migrateProgress.total, 1)) * 100}%`, height: "100%", background: C.accent, transition: "width .3s" }}></div>
+                </div>
+              </div>
+            )}
+
+            {/* 遷移日誌(限高 200px) */}
+            {migrateLog.length > 0 && (
+              <details style={{ marginBottom: 12 }} open={migrating}>
+                <summary style={{ fontSize: 12, color: C.muted, cursor: "pointer", padding: "6px 0" }}>
+                  📋 詳細日誌 ({migrateLog.length} 條)
+                </summary>
+                <div style={{ maxHeight: 200, overflowY: "auto", padding: "10px 12px", background: C.bgDeep, borderRadius: 8, fontSize: 11, lineHeight: 1.7, fontFamily: "monospace" }}>
+                  {migrateLog.slice(-50).map((l, i) => (
+                    <div key={i} style={{ color: l.startsWith("❌") ? C.red : l.startsWith("⏭") ? C.muted : C.greenDark }}>{l}</div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            <button onClick={migrateImages} disabled={migrating || totalBase64Count === 0}
+              style={{ width: "100%", padding: "12px", background: migrating ? C.faint : `linear-gradient(135deg, ${C.pinkDark} 0%, ${C.accent} 100%)`, color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: migrating ? "not-allowed" : "pointer", letterSpacing: .5 }}>
+              {migrating ? "遷移中..." : `⚡ 開始遷移 ${totalBase64Count} 張圖片`}
+            </button>
+
+            <div style={{ fontSize: 10, color: C.faint, textAlign: "center", marginTop: 10, lineHeight: 1.7 }}>
+              💡 過程中請不要關頁面或重整<br/>
+              建議在網路穩定時使用
+            </div>
+          </>
+        )}
       </Card>
 
       <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark, marginTop: 4 }}>🔐 帳號密碼設定</div>
