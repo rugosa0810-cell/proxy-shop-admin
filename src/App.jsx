@@ -2581,6 +2581,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
 
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
+  const [shortCode, setShortCode] = useState(product?.short_code || "");
   const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : String(rate || ""));
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
   const [deadline, setDeadline] = useState(product?.deadline || "");
@@ -2642,6 +2643,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       id: product?.id || secureUid(),
       name: cleanName,
       category: sanitize(cat, 50),
+      short_code: shortCode.trim() ? sanitize(shortCode.trim(), 10) : null,
       price: 0,   // 已棄用,以 variants[].price 為主
       rate: Number(productRate) || 0,
       image: image,
@@ -2671,9 +2673,10 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
             </div>
           </div>
         )}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
           <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
           <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
+          <Input label="短編號(LINE +1 用)" value={shortCode} onChange={v => setShortCode(v.toUpperCase().slice(0, 10))} placeholder="A1" />
         </div>
         <div>
           <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>💱 匯率 ¥1 = NT$</label>
