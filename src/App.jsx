@@ -4993,7 +4993,8 @@ function MergeOrdersButton({ orders, customer, setData, toast }) {
     const total = allItems.reduce((s, it) => s + (it.price||0) * (it.qty||1), 0);
     const profit = toMerge.reduce((s, o) => s + (o.profit||0), 0);
     const no = String(100000 + Math.floor(Math.random() * 900000));
-    const mergedOrder = {
+    
+     const mergedOrder = {
       id: crypto.randomUUID().replace(/-/g,"").slice(0,12),
       no,
       customer_line_id: customer.lineId,
@@ -5002,6 +5003,25 @@ function MergeOrdersButton({ orders, customer, setData, toast }) {
       items: allItems,
       total, profit,
       created_at: new Date().toISOString(),
+      // 付款/匯款資訊 —— 加總訂金、只要有任一筆未收訂金就標記未收、延用第一筆的匯款/收件資訊
+      deposit_amount: toMerge.reduce((s, o) => s + (Number(o.deposit_amount) || Number(o.deposit) || 0), 0),
+      deposit_paid: toMerge.every(o => {
+        const dep = Number(o.deposit_amount) || Number(o.deposit) || 0;
+        return dep <= 0 || !!o.deposit_paid;
+      }),
+      deposit_bank: (toMerge.find(o => o.deposit_bank)?.deposit_bank) || "",
+      deposit_last5: (toMerge.find(o => o.deposit_last5)?.deposit_last5) || "",
+      payment_method: (toMerge.find(o => o.payment_method)?.payment_method) || "",
+      shipping_fee: toMerge.reduce((s, o) => s + (Number(o.shipping_fee) || 0), 0),
+      final_paid: toMerge.every(o => !!o.final_paid),
+      paid: toMerge.every(o => !!o.paid),
+      recipient_phone: (toMerge.find(o => o.recipient_phone)?.recipient_phone) || "",
+      delivery_method: (toMerge.find(o => o.delivery_method)?.delivery_method) || "",
+      store_code: (toMerge.find(o => o.store_code)?.store_code) || "",
+      store_name: (toMerge.find(o => o.store_name)?.store_name) || "",
+      store_address: (toMerge.find(o => o.store_address)?.store_address) || "",
+      is_wholesale: toMerge.some(o => !!o.is_wholesale),
+      wholesale_no: (toMerge.find(o => o.wholesale_no)?.wholesale_no) || "",
     };
     try {
       // 建立合併後訂單
