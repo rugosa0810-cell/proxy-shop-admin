@@ -2751,7 +2751,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
         {/* ── 分頁一:基本資訊(名稱/分類/短編號/圖片) ────────────── */}
         {tab === "basic" && (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
               <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
               <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
               <Input label="短編號(LINE +1 用)" value={shortCode} onChange={v => setShortCode(v.toUpperCase().slice(0, 10))} placeholder="A1" />
@@ -2887,7 +2887,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
               <div style={{ padding:"12px 14px", background:C.accentBg, borderRadius:10, border:`1px dashed ${C.accent}50` }}>
                 <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontWeight:600 }}>+ 新增款式</div>
                 <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ marginBottom:8 }} />
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
                   <Input label="零售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" />
                   <Input label="💎 批發價 NT$" type="number" value={vWholesalePrice} onChange={setVWholesalePrice} placeholder="0 (不填=同零售價)" />
                 </div>
@@ -2928,7 +2928,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div>
               <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>時間設定(選填)</div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 <div>
                   <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display:"block", marginBottom:5 }}>⏰ 結單日期</label>
                   <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)}
