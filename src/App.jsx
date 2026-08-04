@@ -1019,6 +1019,56 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
       return;
     }
 
+    // 特殊處理:任何狀態 → 已取消,且原本已配過貨(未寄出)= 把已配的貨還回庫存
+    if (safeS === "cancelled" && o.status !== "shipped" && o.status !== "cancelled") {
+      const stockedItems = (o.items || []).filter(it => {
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        return sq > 0;
+      });
+      const returnCount = stockedItems.reduce((s, it) => {
+        const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+        return s + sq;
+      }, 0);
+
+      if (returnCount > 0) {
+        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),取消後將把這些貨還回庫存(庫存 +${returnCount})。\n\n確定取消?`)) return;
+
+        const now = new Date().toISOString();
+        const groupByName = new Map();
+        for (const it of stockedItems) {
+          const parts = String(it.name).split(" / ");
+          const productName = parts[0] || it.name;
+          const variantName = parts.slice(1).join(" / ");
+          const displayName = variantName ? `${productName} / ${variantName}` : productName;
+          const sq = Number(it.stocked_qty) || (it.stocked ? (Number(it.qty) || 1) : 0);
+          groupByName.set(displayName, (groupByName.get(displayName) || 0) + sq);
+        }
+        for (const [displayName, qty] of groupByName.entries()) {
+          try {
+            const { data: existing } = await supabase.from("in_stock").select("*").eq("name", displayName).maybeSingle();
+            if (existing) {
+              const newStock = (Number(existing.stock) || 0) + qty;
+              await supabase.from("in_stock").update({ stock: newStock, updated_at: now }).eq("id", existing.id);
+            }
+          } catch (e) { console.warn("取消訂單還原庫存失敗:", e); }
+        }
+
+        const { error } = await supabase.from("orders").update({ status: safeS, updated_at: now }).eq("id", id);
+        if (error) { toast(`更新失敗:${error.message}`); return; }
+
+        const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+        setData(d => ({
+          ...d,
+          orders: d.orders.map(x => x.id === id ? { ...x, status: safeS } : x),
+          inStock: inStockRes.data || d.inStock,
+        }));
+        logAction("取消訂單並還原庫存", `#${o.no} · 還回庫存 ${returnCount} 件`);
+        toast(`✅ 已取消 · ${returnCount} 件還回庫存`);
+        return;
+      }
+      // 沒有已配貨的品項,走一般流程即可(不用特別處理庫存)
+    }
+
     // 一般狀態更新
     const { error } = await supabase.from("orders").update({ status: safeS, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) { toast("更新失敗"); return; }
@@ -2943,6 +2993,7 @@ function aggregatePendingItems(orders) {
       g.orderRefs.push({
         orderId: o.id,
         orderNo: o.no,
+        createdAt: o.created_at || o.createdAt || null,
         customer: o.customer_name || "未名",
         qty: need,
         image: it.image,
@@ -2989,7 +3040,11 @@ function PurchasePage({ data, setData, toast, setTab }) {
     if (!window.confirm(`從庫存配貨:\n\n款式:${variantName}\n可用庫存:${available} 件\n需求:${totalNeed} 件\n\n依訂單先來後到分配,能配多少配多少。`)) return;
 
     let remaining = available;
-    const sortedRefs = [...orderRefs].sort((a, b) => String(a.orderNo).localeCompare(String(b.orderNo)));
+    const sortedRefs = [...orderRefs].sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : Infinity;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : Infinity;
+      return ta - tb;
+    });
     const orderPatches = new Map();
     let allocated = 0;
     const now = new Date().toISOString();
@@ -3520,8 +3575,12 @@ function PurchaseModal({ purchase, prefillName, onClose, data, setData, toast })
             if (need > 0) targets.push({ order: o, itemIdx: idx, need, sq });
           });
         });
-        // 排序:訂單早的先
-        targets.sort((a, b) => String(a.order.no).localeCompare(String(b.order.no)));
+        // 排序:下單時間早的先(不能用 no,因為 no 是隨機碼,不代表下單先後)
+        targets.sort((a, b) => {
+          const ta = a.order.created_at ? new Date(a.order.created_at).getTime() : Infinity;
+          const tb = b.order.created_at ? new Date(b.order.created_at).getTime() : Infinity;
+          return ta - tb;
+        });
 
         // 配貨
         const orderPatches = new Map(); // orderId → { idxToNewSq }
