@@ -2573,7 +2573,12 @@ function CatalogPage({ data, setData, toast }) {
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:6 }}>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:9, color:C.faint, letterSpacing:.5, marginBottom:2 }}>{p.category || "未分類"}</div>
+                      <div style={{ fontSize:9, color:C.faint, letterSpacing:.5, marginBottom:2, display:"flex", alignItems:"center", gap:6 }}>
+                        <span>{p.category || "未分類"}</span>
+                        <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:4, background: p.supply_type==="instock"?C.blueBg:C.accentBg, color: p.supply_type==="instock"?C.blue:C.accentDark }}>
+                          {p.supply_type==="instock"?"現貨":"預購"}
+                        </span>
+                      </div>
                       <div style={{ fontSize:14, fontWeight:500, color:C.text, lineHeight:1.3, wordBreak:"break-word" }}>{p.name}</div>
                     </div>
                     <span className="pill" style={{ background: p.status==="on"?C.greenBg:C.redBg, color: p.status==="on"?C.greenDark:C.red, flexShrink:0 }}>
@@ -2637,6 +2642,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [deadline, setDeadline] = useState(product?.deadline || "");
   const [expectedArrival, setExpectedArrival] = useState(product?.expected_arrival || "");
   const [paymentType, setPaymentType] = useState(product?.payment_type || "full"); // full=付全款, deposit=先付訂金, cod=貨到付款
+  const [supplyType, setSupplyType] = useState(product?.supply_type || "presale"); // presale=預購, instock=現貨
   const [variants, setVariants] = useState(() => {
     const initRate = Number(product?.rate) || rate || 0;
     return (product?.variants || []).map(v => ({
@@ -2670,6 +2676,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
     }
   };
 
+  const [vStock, setVStock]     = useState("");
   const addVariant = () => {
     const n = sanitize(vName, 50); if (!n) return;
     let jpy = 0, cost = 0;
@@ -2681,8 +2688,8 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       cost = Number(vCostTwd) || 0;
       jpy = effectiveRate > 0 ? Math.round(cost / effectiveRate) : 0;
     }
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost }]);
-    setVName(""); setVPrice(""); setVWholesalePrice(""); setVCostJpy(""); setVCostTwd("");
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost, stock: supplyType==="instock" ? (Number(vStock)||0) : undefined }]);
+    setVName(""); setVPrice(""); setVWholesalePrice(""); setVCostJpy(""); setVCostTwd(""); setVStock("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -2700,6 +2707,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       deadline: deadline || null,
       expected_arrival: expectedArrival || null,
       payment_type: paymentType || "full",
+      supply_type: supplyType || "presale",
       status: product?.status || "on",
       variants,
     });
@@ -2751,6 +2759,33 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
         {/* ── 分頁一:基本資訊(名稱/分類/短編號/圖片) ────────────── */}
         {tab === "basic" && (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div>
+              <div style={{ fontWeight:700, fontSize:13, color:C.accentDark, marginBottom:10 }}>📦 供貨方式</div>
+              <div style={{ display:"flex", gap:8 }}>
+                {[
+                  { val:"presale", label:"預購", desc:"先收單、再統一採購" },
+                  { val:"instock", label:"現貨", desc:"款式各自有庫存,賣完即止" },
+                ].map(opt => (
+                  <label key={opt.val}
+                    style={{ flex:1, display:"flex", flexDirection:"column", gap:2, padding:"11px 13px", borderRadius:10, cursor:"pointer",
+                      background: supplyType===opt.val ? C.accentBg : C.bg,
+                      border: `1.5px solid ${supplyType===opt.val ? C.accent : C.border}` }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <input type="radio" name="supply_type" checked={supplyType===opt.val} onChange={()=>setSupplyType(opt.val)}
+                        style={{ accentColor:C.accent, cursor:"pointer" }}/>
+                      <span style={{ fontSize:13, fontWeight:600, color: supplyType===opt.val ? C.accentDark : C.text }}>{opt.label}</span>
+                    </div>
+                    <div style={{ fontSize:10, color:C.muted, marginLeft:22 }}>{opt.desc}</div>
+                  </label>
+                ))}
+              </div>
+              {supplyType === "instock" && (
+                <div style={{ marginTop:10, padding:"10px 12px", background:C.accentBg, borderRadius:8, fontSize:11, color:C.accentDark, lineHeight:1.6 }}>
+                  💡 現貨商品的庫存數量,請到「款式規格」分頁,每個款式各自設定
+                </div>
+              )}
+            </div>
+
             <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
               <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
               <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
@@ -2822,8 +2857,15 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                     <div key={v.id} style={{ padding:"12px 14px", background:C.bgDeep, borderRadius:10, border:`1px solid ${C.border}`, position:"relative" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
                         <div style={{ fontSize:14, fontWeight:600, color:C.text }}>{v.name}</div>
-                        <button onClick={() => removeVariant(v.id)}
-                          style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:18, lineHeight:1, padding:"0 4px" }}>×</button>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          {supplyType === "instock" && (
+                            <span style={{ fontSize:11, fontWeight:700, color: (Number(v.stock)||0) > 0 ? C.green : C.red, background: (Number(v.stock)||0) > 0 ? C.greenBg : C.redBg, padding:"2px 8px", borderRadius:6 }}>
+                              庫存 {Number(v.stock)||0}
+                            </span>
+                          )}
+                          <button onClick={() => removeVariant(v.id)}
+                            style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:18, lineHeight:1, padding:"0 4px" }}>×</button>
+                        </div>
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                         <div>
@@ -2832,6 +2874,20 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                             onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, price:Number(e.target.value)||0} : x))}
                             style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, boxSizing:"border-box", minWidth:0 }}/>
                         </div>
+                        {supplyType === "instock" && (
+                          <div>
+                            <div style={{ fontSize:10, color:C.accentDark, marginBottom:3, fontWeight:600 }}>📦 庫存數量</div>
+                            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                              <button type="button" onClick={() => setVariants(vs => vs.map(x => x.id===v.id ? {...x, stock: Math.max(0, (Number(x.stock)||0) - 1)} : x))}
+                                style={{ width:32, height:32, borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", cursor:"pointer", fontSize:16, color:C.muted, flexShrink:0 }}>−</button>
+                              <input type="number" inputMode="numeric" value={v.stock||0}
+                                onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, stock:Math.max(0, Number(e.target.value)||0)} : x))}
+                                style={{ flex:1, textAlign:"center", background:C.surface, border:`1px solid ${C.accent}40`, borderRadius:8, padding:"8px 10px", fontSize:14, fontWeight:700, color:C.accentDark, boxSizing:"border-box", minWidth:0 }}/>
+                              <button type="button" onClick={() => setVariants(vs => vs.map(x => x.id===v.id ? {...x, stock:(Number(x.stock)||0) + 1} : x))}
+                                style={{ width:32, height:32, borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", cursor:"pointer", fontSize:16, color:C.accent, flexShrink:0 }}>+</button>
+                            </div>
+                          </div>
+                        )}
                         <div>
                           <div style={{ fontSize:10, color:C.pinkDark, marginBottom:3, fontWeight:500 }}>💎 批發價 NT$ <span style={{ color:C.faint, fontWeight:400 }}>(0=同零售)</span></div>
                           <input type="number" inputMode="numeric" value={v.wholesale_price||0}
@@ -2890,6 +2946,9 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                 <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
                   <Input label="零售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" />
                   <Input label="💎 批發價 NT$" type="number" value={vWholesalePrice} onChange={setVWholesalePrice} placeholder="0 (不填=同零售價)" />
+                  {supplyType === "instock" && (
+                    <Input label="📦 庫存數量" type="number" value={vStock} onChange={setVStock} placeholder="0" />
+                  )}
                 </div>
 
                 <div style={{ marginBottom:8 }}>
