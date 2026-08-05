@@ -2712,7 +2712,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       cost = Number(vCostTwd) || 0;
       jpy = effectiveRate > 0 ? Math.round(cost / effectiveRate) : 0;
     }
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost, stock: supplyType==="instock" ? (Number(vStock)||0) : undefined }]);
+    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost, stock: Number(vStock)||0 }]);
     setVName(""); setVPrice(""); setVWholesalePrice(""); setVCostJpy(""); setVCostTwd(""); setVStock("");
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
@@ -2804,11 +2804,11 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                   </label>
                 ))}
               </div>
-              {supplyType === "instock" && (
-                <div style={{ marginTop:10, padding:"10px 12px", background:C.accentBg, borderRadius:8, fontSize:11, color:C.accentDark, lineHeight:1.6 }}>
-                  💡 現貨商品的庫存數量,請到「款式規格」分頁,每個款式各自設定
-                </div>
-              )}
+              <div style={{ marginTop:10, padding:"10px 12px", background:C.accentBg, borderRadius:8, fontSize:11, color:C.accentDark, lineHeight:1.6 }}>
+                {supplyType === "instock"
+                  ? "💡 現貨商品的庫存數量,請到「款式規格」分頁,每個款式各自設定,客人下單會即時扣減"
+                  : "💡 預購商品也可以在「款式規格」分頁填寫目前手邊庫存,但這個數字僅供你自己參考,採購清單仍以「庫存管理」頁面的資料為準"}
+              </div>
             </div>
 
             <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -2884,11 +2884,9 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
                         <div style={{ fontSize:14, fontWeight:600, color:C.text }}>{v.name}</div>
                         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          {supplyType === "instock" && (
-                            <span style={{ fontSize:11, fontWeight:700, color: (Number(v.stock)||0) > 0 ? C.green : C.red, background: (Number(v.stock)||0) > 0 ? C.greenBg : C.redBg, padding:"2px 8px", borderRadius:6 }}>
-                              庫存 {Number(v.stock)||0}
-                            </span>
-                          )}
+                          <span style={{ fontSize:11, fontWeight:700, color: (Number(v.stock)||0) > 0 ? C.green : C.faint, background: (Number(v.stock)||0) > 0 ? C.greenBg : C.bgDeep, padding:"2px 8px", borderRadius:6 }}>
+                            {supplyType === "instock" ? `庫存 ${Number(v.stock)||0}` : `參考庫存 ${Number(v.stock)||0}`}
+                          </span>
                           <button onClick={() => removeVariant(v.id)}
                             style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:18, lineHeight:1, padding:"0 4px" }}>×</button>
                         </div>
@@ -2900,9 +2898,10 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                             onChange={e => setVariants(vs => vs.map(x => x.id===v.id ? {...x, price:Number(e.target.value)||0} : x))}
                             style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, boxSizing:"border-box", minWidth:0 }}/>
                         </div>
-                        {supplyType === "instock" && (
-                          <div>
-                            <div style={{ fontSize:10, color:C.accentDark, marginBottom:3, fontWeight:600 }}>📦 庫存數量</div>
+                        <div>
+                          <div style={{ fontSize:10, color:C.accentDark, marginBottom:3, fontWeight:600 }}>
+                            {supplyType === "instock" ? "📦 庫存數量(下單即扣)" : "📦 目前手邊庫存(選填,僅供參考)"}
+                          </div>
                             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                               <button type="button" onClick={() => setVariants(vs => vs.map(x => x.id===v.id ? {...x, stock: Math.max(0, (Number(x.stock)||0) - 1)} : x))}
                                 style={{ width:32, height:32, borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", cursor:"pointer", fontSize:16, color:C.muted, flexShrink:0 }}>−</button>
@@ -2913,7 +2912,6 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                                 style={{ width:32, height:32, borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", cursor:"pointer", fontSize:16, color:C.accent, flexShrink:0 }}>+</button>
                             </div>
                           </div>
-                        )}
                         <div>
                           <div style={{ fontSize:10, color:C.pinkDark, marginBottom:3, fontWeight:500 }}>💎 批發價 NT$ <span style={{ color:C.faint, fontWeight:400 }}>(0=同零售)</span></div>
                           <input type="number" inputMode="numeric" value={v.wholesale_price||0}
@@ -2972,9 +2970,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                 <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
                   <Input label="零售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" />
                   <Input label="💎 批發價 NT$" type="number" value={vWholesalePrice} onChange={setVWholesalePrice} placeholder="0 (不填=同零售價)" />
-                  {supplyType === "instock" && (
-                    <Input label="📦 庫存數量" type="number" value={vStock} onChange={setVStock} placeholder="0" />
-                  )}
+                  <Input label={supplyType === "instock" ? "📦 庫存數量" : "📦 目前手邊庫存(選填)"} type="number" value={vStock} onChange={setVStock} placeholder="0" />
                 </div>
 
                 <div style={{ marginBottom:8 }}>
