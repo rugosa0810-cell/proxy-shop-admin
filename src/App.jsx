@@ -1030,10 +1030,17 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         return s + sq;
       }, 0);
 
-      if (returnCount > 0) {
-        if (!window.confirm(`此訂單有 ${stockedItems.length} 個品項已配貨(共 ${returnCount} 件),取消後將把這些貨還回庫存(庫存 +${returnCount})。\n\n確定取消?`)) return;
+      // 現貨商品(products 表)已扣的庫存,取消時也要還回去
+      const instockItems = (o.items || []).filter(it => it.supply_type === "instock" && it.product_id && (it.variant_ids || []).length);
+      const instockReturnCount = instockItems.reduce((s, it) => s + (Number(it.qty) || 1), 0);
+
+      if (returnCount > 0 || instockReturnCount > 0) {
+        const totalReturn = returnCount + instockReturnCount;
+        if (!window.confirm(`此訂單有已配貨/現貨扣庫存的品項(共 ${totalReturn} 件),取消後將把這些貨還回庫存。\n\n確定取消?`)) return;
 
         const now = new Date().toISOString();
+
+        // 1) 預購配貨部分(in_stock 表)
         const groupByName = new Map();
         for (const it of stockedItems) {
           const parts = String(it.name).split(" / ");
@@ -1053,20 +1060,36 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
           } catch (e) { console.warn("取消訂單還原庫存失敗:", e); }
         }
 
+        // 2) 現貨部分(products 表 variants[].stock)
+        for (const it of instockItems) {
+          try {
+            const { data: prod } = await supabase.from("products").select("id, variants").eq("id", it.product_id).maybeSingle();
+            if (!prod) continue;
+            const newVariants = (prod.variants || []).map(v =>
+              (it.variant_ids || []).includes(v.id) ? { ...v, stock: (Number(v.stock) || 0) + (Number(it.qty) || 1) } : v
+            );
+            await supabase.from("products").update({ variants: newVariants }).eq("id", it.product_id);
+          } catch (e) { console.warn("取消訂單還原現貨庫存失敗:", e); }
+        }
+
         const { error } = await supabase.from("orders").update({ status: safeS, updated_at: now }).eq("id", id);
         if (error) { toast(`更新失敗:${error.message}`); return; }
 
-        const inStockRes = await supabase.from("in_stock").select("*").order("created_at", { ascending: false });
+        const [inStockRes, productsRes] = await Promise.all([
+          supabase.from("in_stock").select("*").order("created_at", { ascending: false }),
+          supabase.from("products").select("*").order("created_at", { ascending: false }),
+        ]);
         setData(d => ({
           ...d,
           orders: d.orders.map(x => x.id === id ? { ...x, status: safeS } : x),
           inStock: inStockRes.data || d.inStock,
+          products: productsRes.data || d.products,
         }));
-        logAction("取消訂單並還原庫存", `#${o.no} · 還回庫存 ${returnCount} 件`);
-        toast(`✅ 已取消 · ${returnCount} 件還回庫存`);
+        logAction("取消訂單並還原庫存", `#${o.no} · 還回庫存 ${totalReturn} 件`);
+        toast(`✅ 已取消 · ${totalReturn} 件還回庫存`);
         return;
       }
-      // 沒有已配貨的品項,走一般流程即可(不用特別處理庫存)
+      // 沒有已配貨/現貨扣庫存的品項,走一般流程即可(不用特別處理庫存)
     }
 
     // 一般狀態更新
@@ -2637,6 +2660,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
   const [name, setName]         = useState(product?.name || "");
   const [cat, setCat]           = useState(product?.category || "");
   const [shortCode, setShortCode] = useState(product?.short_code || "");
+  const [supplier, setSupplier] = useState(product?.supplier || "");
   const [productRate, setProductRate] = useState(product?.rate ? String(product.rate) : String(rate || ""));
   const [image, setImage]       = useState(product?.image || ""); // emoji or base64
   const [deadline, setDeadline] = useState(product?.deadline || "");
@@ -2701,6 +2725,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       name: cleanName,
       category: sanitize(cat, 50),
       short_code: shortCode.trim() ? sanitize(shortCode.trim(), 10) : null,
+      supplier: sanitize(supplier, 100),
       price: 0,   // 已棄用,以 variants[].price 為主
       rate: Number(productRate) || 0,
       image: image,
@@ -2790,6 +2815,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
               <Input label="商品名稱 *" value={name} onChange={setName} placeholder="資生堂防曬乳" />
               <Input label="分類" value={cat} onChange={setCat} placeholder="藥妝" />
               <Input label="短編號(LINE +1 用)" value={shortCode} onChange={v => setShortCode(v.toUpperCase().slice(0, 10))} placeholder="A1" />
+              <Input label="供應商(選填,純記錄)" value={supplier} onChange={setSupplier} placeholder="例:王老闆 0912-345-678" />
             </div>
 
             <div>
@@ -3313,6 +3339,37 @@ function PurchasePage({ data, setData, toast, setTab }) {
         </div>
       </div>
 
+      {/* 統計總覽:總需求 / 待採買款數 / 建議叫貨總數 */}
+      {(() => {
+        let purchasedDone = 0, purchasedPartial = 0, purchasedNone = 0, suggestOrderTotal = 0;
+        grouped.forEach(([productName, variants]) => {
+          variants.forEach(v => {
+            const stock = getStock(productName, v.variantName);
+            const need = Math.max(0, v.count - stock);
+            suggestOrderTotal += need;
+            if (v.purchasedRefs >= v.orderRefs.length) purchasedDone++;
+            else if (v.purchasedRefs > 0) purchasedPartial++;
+            else purchasedNone++;
+          });
+        });
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            <div style={{ background: C.redBg, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: C.red }}>{suggestOrderTotal}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>建議叫貨(件)</div>
+            </div>
+            <div style={{ background: C.amberBg || C.accentBg, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: C.amber || C.accentDark }}>{purchasedNone + purchasedPartial}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>待採買(款)</div>
+            </div>
+            <div style={{ background: C.greenBg, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: C.green }}>{purchasedDone}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>已完成採買(款)</div>
+            </div>
+          </div>
+        );
+      })()}
+
       {grouped.length === 0 ? (
         <Card style={{ padding: "48px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>✨</div>
@@ -3335,21 +3392,25 @@ function PurchasePage({ data, setData, toast, setTab }) {
                       <input type="checkbox" checked={isSelected} onChange={() => toggleKey(key)}
                         style={{ width: 18, height: 18, accentColor: C.accent, cursor: "pointer", flexShrink: 0 }}/>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{v.variantName}</div>
-                        <div style={{ fontSize: 11, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <span>需 {v.count} 件</span>
-                          {v.purchasedRefs > 0 && v.purchasedRefs === v.orderRefs.length && (
-                            <span style={{ color: C.accent, fontWeight: 600 }}>· 已標記採買 ✓</span>
-                          )}
-                          {v.purchasedRefs > 0 && v.purchasedRefs < v.orderRefs.length && (
-                            <span style={{ color: C.accent, fontWeight: 600 }}>· 部分已標記採買 ({v.purchasedRefs}/{v.orderRefs.length})</span>
-                          )}
-                          {(() => {
-                            const stock = getStock(productName, v.variantName);
-                            if (stock > 0) return <span style={{ color: C.green, fontWeight: 600 }}>· 庫存 {stock} 可配</span>;
-                            return null;
-                          })()}
-                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 5 }}>{v.variantName}</div>
+                        {(() => {
+                          const stock = getStock(productName, v.variantName);
+                          const suggestOrder = Math.max(0, v.count - stock);
+                          const fullyPurchased = v.purchasedRefs > 0 && v.purchasedRefs === v.orderRefs.length;
+                          const partialPurchased = v.purchasedRefs > 0 && v.purchasedRefs < v.orderRefs.length;
+                          return (
+                            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: C.bgDeep, color: C.textMid }}>需求 {v.count}</span>
+                              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: stock > 0 ? C.greenBg : C.bgDeep, color: stock > 0 ? C.green : C.faint }}>庫存 {stock}</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: suggestOrder > 0 ? C.redBg : C.greenBg, color: suggestOrder > 0 ? C.red : C.green }}>
+                                {suggestOrder > 0 ? `建議叫貨 ${suggestOrder}` : "庫存足夠"}
+                              </span>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: fullyPurchased ? C.accentBg : partialPurchased ? (C.amberBg||C.bgDeep) : C.redBg, color: fullyPurchased ? C.accentDark : partialPurchased ? (C.amber||C.textMid) : C.red }}>
+                                {fullyPurchased ? "✓ 已採買" : partialPurchased ? `部分採買 ${v.purchasedRefs}/${v.orderRefs.length}` : "尚未採買"}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
                         {(() => {
