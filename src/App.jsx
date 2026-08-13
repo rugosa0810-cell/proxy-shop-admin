@@ -5750,6 +5750,103 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout, data, setD
     toast(`✅ 遷移完成 · 成功 ${done}${failed > 0 ? ` · 失敗 ${failed}` : ""}${skipped > 0 ? ` · 跳過 ${skipped}` : ""}`);
   };
 
+  // ── 訂單明細圖片遷移(常是 Egress 爆量的主因,獨立跑) ──────
+  const [migratingOrders, setMigratingOrders] = useState(false);
+  const [migrateOrdersProgress, setMigrateOrdersProgress] = useState({ current: 0, total: 0, done: 0, failed: 0, skipped: 0 });
+  const [migrateOrdersLog, setMigrateOrdersLog] = useState([]);
+
+  // 統計:哪些訂單裡有 base64 圖片(可能不只封存訂單,含所有狀態)
+  const ordersWithBase64Images = (data?.orders || []).filter(o =>
+    (o.items || []).some(it => it.image?.startsWith("data:"))
+  );
+  const base64ImageItemCount = ordersWithBase64Images.reduce(
+    (s, o) => s + (o.items || []).filter(it => it.image?.startsWith("data:")).length, 0
+  );
+  const orderBase64Size = (() => {
+    let bytes = 0;
+    ordersWithBase64Images.forEach(o => {
+      (o.items || []).forEach(it => { if (it.image?.startsWith("data:")) bytes += (it.image.length || 0); });
+    });
+    return (bytes / 1024 / 1024).toFixed(1);
+  })();
+
+  const migrateOrderImages = async () => {
+    if (ordersWithBase64Images.length === 0) { toast("沒有需要遷移的訂單圖片"); return; }
+    if (!window.confirm(`將把 ${ordersWithBase64Images.length} 筆訂單、共 ${base64ImageItemCount} 張 base64 圖片轉存到 Supabase Storage,\n\n預計省 ${orderBase64Size} MB 的 Egress(通常是最大的省流量來源)。\n\n這會花幾分鐘,途中請不要關頁面。確定?`)) return;
+
+    setMigratingOrders(true);
+    setMigrateOrdersLog([]);
+    setMigrateOrdersProgress({ current: 0, total: ordersWithBase64Images.length, done: 0, failed: 0, skipped: 0 });
+
+    let done = 0, failed = 0, skipped = 0;
+    const logLines = [];
+
+    for (let i = 0; i < ordersWithBase64Images.length; i++) {
+      const order = ordersWithBase64Images[i];
+      setMigrateOrdersProgress(p => ({ ...p, current: i + 1 }));
+      try {
+        let orderFailed = false;
+        const newItems = await Promise.all((order.items || []).map(async (it) => {
+          if (!it.image?.startsWith("data:")) return it;
+          try {
+            const dataUrl = it.image;
+            const [meta, b64] = dataUrl.split(",");
+            const mime = meta.match(/data:([^;]+)/)?.[1] || "image/jpeg";
+            const bytes = atob(b64);
+            const arr = new Uint8Array(bytes.length);
+            for (let j = 0; j < bytes.length; j++) arr[j] = bytes.charCodeAt(j);
+            const blob = new Blob([arr], { type: mime });
+
+            if (blob.size > 5 * 1024 * 1024) {
+              skipped++;
+              logLines.push(`⏭ #${order.no} · ${it.name} (超過 5MB)`);
+              setMigrateOrdersLog([...logLines]);
+              return it; // 保留原樣,不處理
+            }
+
+            const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+            const fileName = `order_migrated_${Date.now()}_${secureUid()}.${ext}`;
+            const { error: upErr } = await supabase.storage
+              .from("product-images")
+              .upload(fileName, blob, { contentType: mime, upsert: false });
+            if (upErr) { orderFailed = true; logLines.push(`❌ #${order.no} · ${it.name}: ${upErr.message}`); setMigrateOrdersLog([...logLines]); return it; }
+
+            const { data: urlData } = supabase.storage.from("product-images").getPublicUrl(fileName);
+            return { ...it, image: urlData.publicUrl };
+          } catch (e) {
+            orderFailed = true;
+            logLines.push(`❌ #${order.no} · ${it.name}: ${e.message || e}`);
+            setMigrateOrdersLog([...logLines]);
+            return it;
+          }
+        }));
+
+        const { error: dbErr } = await supabase.from("orders").update({ items: newItems }).eq("id", order.id);
+        if (dbErr) {
+          failed++;
+          logLines.push(`❌ #${order.no}: 更新失敗 ${dbErr.message}`);
+          setMigrateOrdersLog([...logLines]);
+          continue;
+        }
+
+        setData(d => ({ ...d, orders: d.orders.map(o => o.id === order.id ? { ...o, items: newItems } : o) }));
+
+        if (orderFailed) { failed++; } else { done++; logLines.push(`✅ #${order.no}`); }
+        setMigrateOrdersProgress(p => ({ ...p, done, failed }));
+        setMigrateOrdersLog([...logLines]);
+      } catch (e) {
+        failed++;
+        logLines.push(`❌ #${order.no}: ${e.message || e}`);
+        setMigrateOrdersLog([...logLines]);
+      }
+    }
+
+    setMigrateOrdersProgress(p => ({ ...p, done, failed, skipped }));
+    setMigratingOrders(false);
+    logAction("訂單圖片遷移", `完成 ${done} 筆訂單 · 失敗 ${failed} · 跳過 ${skipped}`);
+    toast(`✅ 訂單圖片遷移完成 · 成功 ${done} 筆${failed > 0 ? ` · 失敗 ${failed}` : ""}${skipped > 0 ? ` · 跳過 ${skipped}` : ""}`);
+  };
+
   // 賣貨便連結 state
   const [shopeeUrl, setShopeeUrl] = useState("");
   const [shopeeLoading, setShopeeLoading] = useState(true);
@@ -5989,6 +6086,83 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout, data, setD
             <div style={{ fontSize: 10, color: C.faint, textAlign: "center", marginTop: 10, lineHeight: 1.7 }}>
               💡 過程中請不要關頁面或重整<br/>
               建議在網路穩定時使用
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* 🖼 訂單圖片遷移工具(通常是 Egress 主因) */}
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.red, marginTop: 4 }}>📦 訂單圖片遷移工具 <span style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>(通常是流量爆量的主因)</span></div>
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.7 }}>
+          客人加入購物車時,商品圖會被整包複製存進那筆訂單裡。如果複製當下商品圖還是 base64,這張圖就會卡在訂單裡——而訂單被讀取的頻率遠比商品高,通常才是流量爆量的真正原因。這個工具會把「已經存在的訂單」裡卡住的 base64 圖片,轉存到 Storage。
+        </div>
+
+        {ordersWithBase64Images.length === 0 && !migratingOrders ? (
+          <div style={{ padding: "20px", background: C.greenBg, borderRadius: 10, textAlign: "center" }}>
+            <div style={{ fontSize: 32, marginBottom: 6 }}>✅</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.greenDark }}>訂單裡沒有 base64 圖片了</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>不需要遷移</div>
+          </div>
+        ) : (
+          <>
+            {!migratingOrders && (
+              <div style={{ padding: "14px 16px", background: C.redBg, borderRadius: 10, marginBottom: 12, border: `1.5px solid ${C.red}40` }}>
+                <div style={{ fontSize: 12, color: C.red, fontWeight: 700, marginBottom: 8 }}>📊 待遷移統計</div>
+                <div style={{ display: "flex", gap: 20, fontSize: 12, color: C.textMid, flexWrap: "wrap" }}>
+                  <div>
+                    <span style={{ color: C.muted }}>受影響訂單:</span>
+                    <span style={{ fontWeight: 700, color: C.red, marginLeft: 4 }}>{ordersWithBase64Images.length} 筆</span>
+                  </div>
+                  <div>
+                    <span style={{ color: C.muted }}>圖片張數:</span>
+                    <span style={{ fontWeight: 700, color: C.red, marginLeft: 4 }}>{base64ImageItemCount} 張</span>
+                  </div>
+                  <div>
+                    <span style={{ color: C.muted }}>總大小:</span>
+                    <span style={{ fontWeight: 700, color: C.red, marginLeft: 4 }}>{orderBase64Size} MB</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {migratingOrders && (
+              <div style={{ padding: "14px 16px", background: C.accentBg, borderRadius: 10, marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.accentDark }}>
+                    處理中 {migrateOrdersProgress.current} / {migrateOrdersProgress.total} 筆訂單
+                  </span>
+                  <span style={{ fontSize: 11, color: C.muted }}>
+                    ✅ {migrateOrdersProgress.done}  ❌ {migrateOrdersProgress.failed}  ⏭ {migrateOrdersProgress.skipped}
+                  </span>
+                </div>
+                <div style={{ height: 8, background: "#fff", borderRadius: 99, overflow: "hidden" }}>
+                  <div style={{ width: `${(migrateOrdersProgress.current / Math.max(migrateOrdersProgress.total, 1)) * 100}%`, height: "100%", background: C.accent, transition: "width .3s" }}></div>
+                </div>
+              </div>
+            )}
+
+            {migrateOrdersLog.length > 0 && (
+              <details style={{ marginBottom: 12 }} open={migratingOrders}>
+                <summary style={{ fontSize: 12, color: C.muted, cursor: "pointer", padding: "6px 0" }}>
+                  📋 詳細日誌 ({migrateOrdersLog.length} 條)
+                </summary>
+                <div style={{ maxHeight: 200, overflowY: "auto", padding: "10px 12px", background: C.bgDeep, borderRadius: 8, fontSize: 11, lineHeight: 1.7, fontFamily: "monospace" }}>
+                  {migrateOrdersLog.slice(-50).map((l, i) => (
+                    <div key={i} style={{ color: l.startsWith("❌") ? C.red : l.startsWith("⏭") ? C.muted : C.greenDark }}>{l}</div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            <button onClick={migrateOrderImages} disabled={migratingOrders || ordersWithBase64Images.length === 0}
+              style={{ width: "100%", padding: "12px", background: migratingOrders ? C.faint : `linear-gradient(135deg, ${C.red} 0%, ${C.pinkDark} 100%)`, color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: migratingOrders ? "not-allowed" : "pointer", letterSpacing: .5 }}>
+              {migratingOrders ? "遷移中..." : `⚡ 開始遷移 ${ordersWithBase64Images.length} 筆訂單`}
+            </button>
+
+            <div style={{ fontSize: 10, color: C.faint, textAlign: "center", marginTop: 10, lineHeight: 1.7 }}>
+              💡 過程中請不要關頁面或重整<br/>
+              建議先跑上面的「商品/現貨圖片遷移」,再跑這個
             </div>
           </>
         )}
