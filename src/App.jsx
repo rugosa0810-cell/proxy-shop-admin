@@ -2703,9 +2703,12 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
 
   const [vStock, setVStock]     = useState("");
   const addVariant = () => {
-    const rawName = sanitize(vName, 50); if (!rawName) return;
+    const rawInput = sanitize(vName, 500); if (!rawInput) return;
     const group = sanitize(vGroup, 30);
-    const n = group ? `${group}:${rawName}` : rawName; // 有填「所屬款式」就組成「群組:選項」,客人端會自動排成分組按鈕
+    // 支援批次輸入:用 / 、,或、頓號分隔,一次拆成多個獨立選項(例如「Kitty/美樂蒂/布丁狗」→ 3 個選項)
+    const names = rawInput.split(/[\/,，、]+/).map(s => s.trim()).filter(Boolean);
+    if (names.length === 0) return;
+
     let jpy = 0, cost = 0;
     if (costMode === "jpy") {
       jpy = Number(vCostJpy) || 0;
@@ -2715,7 +2718,12 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       cost = Number(vCostTwd) || 0;
       jpy = effectiveRate > 0 ? Math.round(cost / effectiveRate) : 0;
     }
-    setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost, stock: Number(vStock)||0 }]);
+
+    const newOnes = names.map(rawName => {
+      const n = group ? `${group}:${rawName}` : rawName; // 有填「所屬款式」就組成「群組:選項」,客人端會自動排成分組按鈕
+      return { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost, stock: Number(vStock)||0 };
+    });
+    setVariants(vs => [...vs, ...newOnes]);
     setVName(""); setVPrice(""); setVWholesalePrice(""); setVCostJpy(""); setVCostTwd(""); setVStock("");
     // vGroup 刻意不清空,方便連續新增同一款式底下的多個細項(例如連續加 Kitty、美樂蒂、布丁狗)
   };
@@ -2983,7 +2991,10 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                     填了這個,客人端會先讓客人選「款式」,再選下面的「款式名稱」當細項(例如款式=舒壓玩偶,細項=Kitty/美樂蒂...)。不填就是單層,直接列出選項。
                   </div>
                 </div>
-                <Input label={vGroup ? "細項名稱(例如:Kitty)" : "款式名稱"} value={vName} onChange={setVName} placeholder={vGroup ? "Kitty / 美樂蒂 / 布丁狗" : "紅色 / M號 / 草莓"} style={{ marginBottom:8 }} />
+                <Input label={vGroup ? "細項名稱(例如:Kitty)" : "款式名稱"} value={vName} onChange={setVName} placeholder={vGroup ? "Kitty / 美樂蒂 / 布丁狗" : "紅色 / M號 / 草莓"} style={{ marginBottom:4 }} />
+                <div style={{ fontSize:10, color:C.accent, marginBottom:8, lineHeight:1.6 }}>
+                  💡 可以用「/」或「,」一次輸入多個,例如「Kitty/美樂蒂/布丁狗」按下方按鈕會一次新增 3 個獨立選項
+                </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
                   <Input label="零售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" />
                   <Input label="💎 批發價 NT$" type="number" value={vWholesalePrice} onChange={setVWholesalePrice} placeholder="0 (不填=同零售價)" />
