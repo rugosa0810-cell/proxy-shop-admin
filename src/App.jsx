@@ -2674,6 +2674,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
       cost: v.cost != null ? v.cost : Math.round((Number(v.costJpy)||0) * initRate),
     }));
   });
+  const [vGroup, setVGroup]     = useState(""); // 所屬款式/群組(選填,例如:舒壓玩偶)
   const [vName, setVName]       = useState("");
   const [vPrice, setVPrice]     = useState("");
   const [vWholesalePrice, setVWholesalePrice] = useState("");
@@ -2702,7 +2703,9 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
 
   const [vStock, setVStock]     = useState("");
   const addVariant = () => {
-    const n = sanitize(vName, 50); if (!n) return;
+    const rawName = sanitize(vName, 50); if (!rawName) return;
+    const group = sanitize(vGroup, 30);
+    const n = group ? `${group}:${rawName}` : rawName; // 有填「所屬款式」就組成「群組:選項」,客人端會自動排成分組按鈕
     let jpy = 0, cost = 0;
     if (costMode === "jpy") {
       jpy = Number(vCostJpy) || 0;
@@ -2714,6 +2717,7 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
     }
     setVariants(vs => [...vs, { id:secureUid(), name:n, price:Number(vPrice)||0, wholesale_price:Number(vWholesalePrice)||0, costJpy:jpy, cost, stock: Number(vStock)||0 }]);
     setVName(""); setVPrice(""); setVWholesalePrice(""); setVCostJpy(""); setVCostTwd(""); setVStock("");
+    // vGroup 刻意不清空,方便連續新增同一款式底下的多個細項(例如連續加 Kitty、美樂蒂、布丁狗)
   };
   const removeVariant = id => setVariants(vs => vs.filter(v => v.id !== id));
 
@@ -2882,7 +2886,14 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
                   {variants.map(v => (
                     <div key={v.id} style={{ padding:"12px 14px", background:C.bgDeep, borderRadius:10, border:`1px solid ${C.border}`, position:"relative" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                        <div style={{ fontSize:14, fontWeight:600, color:C.text }}>{v.name}</div>
+                        <div style={{ fontSize:14, fontWeight:600, color:C.text }}>
+                          {v.name.includes(":") ? (
+                            <>
+                              <span style={{ fontSize:10, fontWeight:500, color:C.muted, background:C.accentBg, padding:"1px 6px", borderRadius:4, marginRight:6 }}>{v.name.split(":")[0]}</span>
+                              {v.name.split(":").slice(1).join(":")}
+                            </>
+                          ) : v.name}
+                        </div>
                         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                           <span style={{ fontSize:11, fontWeight:700, color: (Number(v.stock)||0) > 0 ? C.green : C.faint, background: (Number(v.stock)||0) > 0 ? C.greenBg : C.bgDeep, padding:"2px 8px", borderRadius:6 }}>
                             {supplyType === "instock" ? `庫存 ${Number(v.stock)||0}` : `參考庫存 ${Number(v.stock)||0}`}
@@ -2966,7 +2977,13 @@ function ProductModal({ product, onSave, onClose, rate = 0 }) {
               )}
               <div style={{ padding:"12px 14px", background:C.accentBg, borderRadius:10, border:`1px dashed ${C.accent}50` }}>
                 <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontWeight:600 }}>+ 新增款式</div>
-                <Input label="款式名稱" value={vName} onChange={setVName} placeholder="紅色 / M號 / 草莓" style={{ marginBottom:8 }} />
+                <div style={{ marginBottom:8, padding:"10px 12px", background:"#fff", borderRadius:8, border:`1px solid ${C.border}` }}>
+                  <Input label="所屬款式(選填,兩層式規格用)" value={vGroup} onChange={setVGroup} placeholder="例如:舒壓玩偶" style={{ marginBottom:6 }} />
+                  <div style={{ fontSize:10, color:C.muted, lineHeight:1.6 }}>
+                    填了這個,客人端會先讓客人選「款式」,再選下面的「款式名稱」當細項(例如款式=舒壓玩偶,細項=Kitty/美樂蒂...)。不填就是單層,直接列出選項。
+                  </div>
+                </div>
+                <Input label={vGroup ? "細項名稱(例如:Kitty)" : "款式名稱"} value={vName} onChange={setVName} placeholder={vGroup ? "Kitty / 美樂蒂 / 布丁狗" : "紅色 / M號 / 草莓"} style={{ marginBottom:8 }} />
                 <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
                   <Input label="零售價 NT$" type="number" value={vPrice} onChange={setVPrice} placeholder="0" />
                   <Input label="💎 批發價 NT$" type="number" value={vWholesalePrice} onChange={setVWholesalePrice} placeholder="0 (不填=同零售價)" />
