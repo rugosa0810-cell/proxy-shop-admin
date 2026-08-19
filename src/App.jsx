@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -337,14 +338,14 @@ const logAction = (action, detail = "") => {
 const loginLimiter = createRateLimiter(5, 5 * 60 * 1000);
 
 // ─── Export CSV ───────────────────────────────────────────────────
-function exportCSV(orders, filename) {
+// 共用:把訂單組成表格資料(header + rows),CSV 跟 Excel 匯出都用這份,確保欄位一致
+function buildOrderExportRows(orders) {
   const header = [
     "訂單號","訂單日期","社群名稱","批發客","批發編號","商品","規格","數量","成本","售價","利潤",
     "取貨方式","門市名稱","門市代碼","收件電話",
     "國際運費","收款日期","出貨日期","付款方式","匯款銀行","後五碼","訂金金額","是否已收款","狀態"
   ];
   const deliveryLabel = m => m === "shopee" ? "賣貨便" : m === "meetup" ? "面交" : m === "delivery" ? "宅配" : (m || "");
-  // 每個品項分一行
   const rows = [];
   orders.forEach(o => {
     const name = o.community_name || o.customer_name || o.customerName || "";
@@ -385,6 +386,11 @@ function exportCSV(orders, filename) {
       });
     }
   });
+  return { header, rows };
+}
+
+function exportCSV(orders, filename) {
+  const { header, rows } = buildOrderExportRows(orders);
   const q = '"';
   const csv = [header, ...rows].map(r => r.map(v => (q+String(v||"").replace(new RegExp(q,"g"),q+q)+q)).join(",")).join("\n");
   const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"});
@@ -393,6 +399,22 @@ function exportCSV(orders, filename) {
   a.download = filename || ("訂單匯出_"+new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")+".csv");
   a.click();
   logAction("匯出CSV", "匯出 "+orders.length+" 筆訂單");
+}
+
+// 真正的 Excel(.xlsx)匯出,用 SheetJS
+function exportExcel(orders, filename) {
+  const { header, rows } = buildOrderExportRows(orders);
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  // 依內容概略設定欄寬,避免擠成一團
+  ws["!cols"] = header.map((h, i) => {
+    if ([5,6].includes(i)) return { wch: 22 }; // 商品/規格欄位較寬
+    if (h === "收件電話") return { wch: 14 };
+    return { wch: 10 };
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "訂單");
+  XLSX.writeFile(wb, filename || ("訂單匯出_"+new Date().toLocaleDateString("zh-TW").replace(/\//g,"-")+".xlsx"));
+  logAction("匯出Excel", "匯出 "+orders.length+" 筆訂單");
 }
 
 // ─── Login ────────────────────────────────────────────────────────
@@ -884,9 +906,21 @@ function MorePage({ tabs, onSelect, onLogout, credentials, reloadData, toast }) 
 function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChange, mobile }) {
   const [filter, setFilter] = useState(initialFilter);
   const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState("");
   const STATUS_KEYS = ["all","pending_review","pending","bought","shipped","arrived","cancelled"];
   const uniqueOrders = Array.from(new Map(data.orders.map(o => [o.id, o])).values());
-  const filtered = uniqueOrders.filter(o => !o.archived).filter(o => filter === "all" || o.status === filter);
+  const searchLower = search.trim().toLowerCase();
+  const filtered = uniqueOrders
+    .filter(o => !o.archived)
+    .filter(o => filter === "all" || o.status === filter)
+    .filter(o => {
+      if (!searchLower) return true;
+      const inNo = String(o.no || "").toLowerCase().includes(searchLower);
+      const inCustomer = String(o.customer_name || "").toLowerCase().includes(searchLower);
+      const inItems = (o.items || []).some(it => String(it.name || "").toLowerCase().includes(searchLower));
+      const inPhone = String(o.recipient_phone || "").toLowerCase().includes(searchLower);
+      return inNo || inCustomer || inItems || inPhone;
+    });
 
   // 同步外部篩選（統計卡片點擊）
   useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
@@ -1173,6 +1207,21 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
         </div>
       )}
 
+      {/* 搜尋框:訂單編號 / 客人姓名 / 商品名稱 / 收件電話 */}
+      <div style={{ position: "relative" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="搜尋訂單編號、客人姓名、商品名稱、電話..."
+          style={{ width: "100%", background: C.bgCard, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: "9px 34px 9px 13px", fontSize: 13, color: C.text, boxSizing: "border-box" }}
+          onFocus={e => e.target.style.borderColor = C.accent}
+          onBlur={e => e.target.style.borderColor = C.border} />
+        {search ? (
+          <button onClick={() => setSearch("")}
+            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: C.bgDeep, border: "none", color: C.muted, width: 20, height: 20, borderRadius: "50%", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+        ) : (
+          <Icon name="search" size={15} color={C.faint} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)" }} />
+        )}
+      </div>
+
       {/* 篩選按鈕列(其他細部狀態) */}
       <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none", paddingBottom: 2 }}>
         {STATUS_KEYS.filter(s => mobile ? !["all","pending","bought"].includes(s) : true).map(s => {
@@ -1194,7 +1243,8 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
           {filter !== "all" && ` · ${ORDER_STATUS[filter]?.label}`}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          {!mobile && <Btn sm variant="ghost" icon="file-export" onClick={() => { exportCSV(data.orders); toast("CSV 已匯出"); }}>匯出</Btn>}
+          {!mobile && <Btn sm variant="ghost" icon="file-export" onClick={() => { exportCSV(filtered); toast(`CSV 已匯出 · ${filtered.length} 筆`); }}>CSV</Btn>}
+          {!mobile && <Btn sm variant="ghost" icon="file-export" onClick={() => { exportExcel(filtered); toast(`Excel 已匯出 · ${filtered.length} 筆`); }}>Excel</Btn>}
           <Btn sm icon="plus" onClick={() => setShowAdd(true)}>新增訂單</Btn>
         </div>
       </div>
