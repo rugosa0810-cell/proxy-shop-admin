@@ -1213,6 +1213,142 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
 }
 
 // ─── 訂單卡片元件 ────────────────────────────────────────────────
+// ─── 請款單(單筆訂單 / 客人多筆訂單合併結算)────────────────
+function BillingStatementModal({ mode, order, customerName, customerOrders, onClose }) {
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
+  const ordersToShow = mode === "single" ? [order] : (customerOrders || []).filter(o => {
+    if (!o.created_at) return true;
+    const t = new Date(o.created_at).getTime();
+    if (startDate && t < new Date(startDate).getTime()) return false;
+    if (endDate && t > new Date(endDate + "T23:59:59").getTime()) return false;
+    return true;
+  });
+
+  const calcOrder = (o) => {
+    const deposit = Number(o.deposit) || Number(o.deposit_amount) || 0;
+    const shippingFee = Number(o.shipping_fee) || 0;
+    const total = Number(o.total) || 0;
+    const finalPayment = Math.max(0, total + shippingFee - deposit);
+    const paid = (o.deposit_paid ? deposit : 0) + (o.final_paid ? finalPayment : 0);
+    const grand = total + shippingFee;
+    const unpaid = Math.max(0, grand - paid);
+    return { total, shippingFee, grand, paid, unpaid };
+  };
+
+  const grandTotal = ordersToShow.reduce((s, o) => s + calcOrder(o).grand, 0);
+  const grandPaid = ordersToShow.reduce((s, o) => s + calcOrder(o).paid, 0);
+  const grandUnpaid = Math.max(0, grandTotal - grandPaid);
+
+  const displayName = mode === "single" ? (order?.customer_name || "") : customerName;
+  const today = new Date().toLocaleDateString("zh-TW");
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(58,46,36,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #billing-print-area, #billing-print-area * { visibility: visible; }
+          #billing-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+      <div style={{ background: "#fff", borderRadius: 16, maxWidth: 560, width: "100%", maxHeight: "92vh", overflow: "auto", boxShadow: C.shadowLg }}>
+        <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.accentDark }}>📄 請款單</div>
+          <button onClick={onClose} style={{ background: C.bgDeep, border: "none", width: 30, height: 30, borderRadius: "50%", cursor: "pointer", fontSize: 16, color: C.muted }}>×</button>
+        </div>
+
+        {mode === "batch" && (
+          <div className="no-print" style={{ padding: "14px 20px", background: C.bgDeep, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>起</div>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}/>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>迄</div>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}/>
+            </div>
+            <div style={{ fontSize: 11, color: C.faint, alignSelf: "center" }}>留空 = 全部訂單</div>
+          </div>
+        )}
+
+        <div id="billing-print-area" style={{ padding: "28px 24px" }}>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: C.accentDark }}>請款單</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>開立日期:{today}</div>
+          </div>
+
+          <div style={{ marginBottom: 16, fontSize: 13, lineHeight: 1.8 }}>
+            <div><strong>客人:</strong> {displayName}</div>
+            {mode === "batch" && <div><strong>期間:</strong> {startDate || "最早"} ~ {endDate || "至今"}</div>}
+            {mode === "single" && <div><strong>訂單編號:</strong> #{order?.no}</div>}
+          </div>
+
+          {ordersToShow.map(o => {
+            const c = calcOrder(o);
+            return (
+              <div key={o.id} style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px dashed ${C.border}` }}>
+                {mode === "batch" && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 6 }}>
+                    <span>#{o.no} · {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : ""}</span>
+                    <span>{ORDER_STATUS[o.status]?.label || o.status}</span>
+                  </div>
+                )}
+                {(o.items || []).map((it, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                    <span>{it.name} × {it.qty}</span>
+                    <span>{fmtMoney((it.price || 0) * (it.qty || 1))}</span>
+                  </div>
+                ))}
+                {c.shippingFee > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, padding: "3px 0" }}>
+                    <span>運費</span><span>{fmtMoney(c.shippingFee)}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginTop: 4 }}>
+                  <span>小計</span><span>{fmtMoney(c.grand)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.green, marginTop: 2 }}>
+                  <span>已付</span><span>{fmtMoney(c.paid)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: c.unpaid > 0 ? C.red : C.green }}>
+                  <span>未付</span><span>{fmtMoney(c.unpaid)}</span>
+                </div>
+              </div>
+            );
+          })}
+
+          {ordersToShow.length === 0 && (
+            <div style={{ textAlign: "center", padding: "30px 0", color: C.muted, fontSize: 13 }}>此區間沒有符合的訂單</div>
+          )}
+
+          <div style={{ marginTop: 20, paddingTop: 14, borderTop: `2px solid ${C.accent}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
+              <span>應付總額</span><span style={{ fontWeight: 700 }}>{fmtMoney(grandTotal)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.green, marginBottom: 4 }}>
+              <span>已付金額</span><span>{fmtMoney(grandPaid)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 700, color: grandUnpaid > 0 ? C.red : C.green }}>
+              <span>尚欠金額</span><span>{fmtMoney(grandUnpaid)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="no-print" style={{ display: "flex", gap: 10, padding: "14px 20px", borderTop: `1px solid ${C.border}` }}>
+          <Btn variant="ghost" onClick={onClose} style={{ flex: 1 }}>關閉</Btn>
+          <Btn onClick={() => window.print()} style={{ flex: 2 }}>🖨 列印 / 存成 PDF</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
   // 找出這位客人的會員資料 (用 line_user_id 或 customer_line_id 比對)
   const memberInfo = members.find(m =>
@@ -1223,6 +1359,7 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
   const displayName = memberInfo?.community_name || o.customer_name || o.customerName || "未命名";
   const displayLineName = memberInfo?.line_name || "";
   const [expanded, setExpanded] = useState(false);
+  const [showBilling, setShowBilling] = useState(false);
 
   const cost = (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
   const total = o.total || 0;
@@ -1591,11 +1728,13 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                   toast("已封存 📦");
                 }} style={{ background:"#eaede8",border:"none",color:"#3d4a3e",padding:"0 10px",height:30,borderRadius:8,fontSize:11,cursor:"pointer",fontWeight:600 }}>📦 封存</button>
               )}
+              <button onClick={()=>setShowBilling(true)} style={{ background:C.accentBg,border:`1px solid ${C.accent}40`,color:C.accentDark,padding:"0 10px",height:30,borderRadius:8,fontSize:11,cursor:"pointer",fontWeight:600 }}>📄 請款單</button>
               <button onClick={()=>del(o.id)} style={{ background:C.redBg,border:"none",color:C.red,width:30,height:30,borderRadius:8,fontSize:15,cursor:"pointer" }}>🗑</button>
             </div>
           </div>
         </div>
       )}
+      {showBilling && <BillingStatementModal mode="single" order={o} onClose={()=>setShowBilling(false)} />}
     </div>
   );
 }
@@ -4797,6 +4936,7 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
   const [editingId, setEditingId]     = useState(null);
   const [noteInput, setNoteInput]     = useState("");
   const [notifyTargets, setNotifyTargets] = useState(null);
+  const [billingTarget, setBillingTarget] = useState(null); // { customerName, orders }
 
   // 生成批發客編號 W + YYMMDD + 3位序號
   const generateWholesaleNo = () => {
@@ -4933,6 +5073,14 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
           onClose={() => setNotifyTargets(null)}
         />
       )}
+      {billingTarget && (
+        <BillingStatementModal
+          mode="batch"
+          customerName={billingTarget.customerName}
+          customerOrders={billingTarget.orders}
+          onClose={() => setBillingTarget(null)}
+        />
+      )}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ fontWeight:700, fontSize:16, color:C.accentDark }}>
           客人管理（{allCustomers.length} 位）
@@ -5045,6 +5193,10 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
                       <button onClick={e => { e.stopPropagation(); setNotifyTargets([{ name: c.name, lineUserId: c.lineId }]); }}
                         style={{ fontSize:11, background:"#3d4a3e", color:"#fff", border:"none", borderRadius:99, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontWeight:600 }}>
                         📨 通知
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); setBillingTarget({ customerName: c.name, orders: orders.filter(o => o.status !== "cancelled") }); }}
+                        style={{ fontSize:11, background:C.accentBg, color:C.accentDark, border:`1px solid ${C.accent}40`, borderRadius:99, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontWeight:600 }}>
+                        📄 請款單
                       </button>
                       <Btn sm variant="ghost" onClick={e => { e.stopPropagation(); setNoteInput(c.note||""); setEditingId(c.id); }}>✏️ 編輯</Btn>
                     </>
