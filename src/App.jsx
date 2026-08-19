@@ -1217,6 +1217,23 @@ function OrdersPage({ data, setData, toast, initialFilter = "all", onFilterChang
 function BillingStatementModal({ mode, order, customerName, customerOrders, onClose }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [batchLabel, setBatchLabel] = useState(""); // 團名/批次名稱(選填,例如:韓國親飛)
+  const [extraFee, setExtraFee] = useState(""); // 附加費(例如賣貨便手續費),每次請款單各自填
+  const [shopName, setShopName] = useState("");
+  const [bankInfo, setBankInfo] = useState("");
+  const [noteText, setNoteText] = useState("");
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from("settings").select("*").eq("key", "billing_shop_name").maybeSingle(),
+      supabase.from("settings").select("*").eq("key", "billing_bank_info").maybeSingle(),
+      supabase.from("settings").select("*").eq("key", "billing_note").maybeSingle(),
+    ]).then(([shopNameRes, bankRes, noteRes]) => {
+      if (shopNameRes.data?.value) setShopName(shopNameRes.data.value);
+      if (bankRes.data?.value) setBankInfo(bankRes.data.value);
+      if (noteRes.data?.value) setNoteText(noteRes.data.value);
+    }).catch(() => {});
+  }, []);
 
   const ordersToShow = mode === "single" ? [order] : (customerOrders || []).filter(o => {
     if (!o.created_at) return true;
@@ -1237,12 +1254,34 @@ function BillingStatementModal({ mode, order, customerName, customerOrders, onCl
     return { total, shippingFee, grand, paid, unpaid };
   };
 
-  const grandTotal = ordersToShow.reduce((s, o) => s + calcOrder(o).grand, 0);
-  const grandPaid = ordersToShow.reduce((s, o) => s + calcOrder(o).paid, 0);
-  const grandUnpaid = Math.max(0, grandTotal - grandPaid);
+  // 收款核對用的彙總數字(商品總額 / 已購買 / 未購買 / 運費 / 已匯款)
+  let itemsTotal = 0, purchasedAmt = 0, shippingFeeSum = 0, paidAmt = 0;
+  ordersToShow.forEach(o => {
+    (o.items || []).forEach(it => {
+      const amt = (Number(it.price) || 0) * (Number(it.qty) || 1);
+      itemsTotal += amt;
+      if (it.purchased) purchasedAmt += amt;
+    });
+    const c = calcOrder(o);
+    shippingFeeSum += c.shippingFee;
+    paidAmt += c.paid;
+  });
+  const unpurchasedAmt = Math.max(0, itemsTotal - purchasedAmt);
+  const extraFeeNum = Number(extraFee) || 0;
+  const billTotal = itemsTotal + shippingFeeSum + extraFeeNum;
+  const unpaid = Math.max(0, billTotal - paidAmt);
 
   const displayName = mode === "single" ? (order?.customer_name || "") : customerName;
-  const today = new Date().toLocaleDateString("zh-TW");
+  const periodText = mode === "single"
+    ? (order?.created_at ? new Date(order.created_at).toLocaleDateString("zh-TW") : "")
+    : `${startDate || "最早"} ~ ${endDate || "至今"}`;
+  const codeLabel = mode === "single" ? `#${order?.no || ""}` : "";
+
+  const Row = ({ label, value, bold, color }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: bold ? 15 : 13, fontWeight: bold ? 700 : 400, color: color || C.text, padding: "6px 0" }}>
+      <span>{label}</span><span>{value}</span>
+    </div>
+  );
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(58,46,36,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
@@ -1255,88 +1294,126 @@ function BillingStatementModal({ mode, order, customerName, customerOrders, onCl
           .no-print { display: none !important; }
         }
       `}</style>
-      <div style={{ background: "#fff", borderRadius: 16, maxWidth: 560, width: "100%", maxHeight: "92vh", overflow: "auto", boxShadow: C.shadowLg }}>
+      <div style={{ background: "#fff", borderRadius: 16, maxWidth: 480, width: "100%", maxHeight: "92vh", overflow: "auto", boxShadow: C.shadowLg }}>
         <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: C.accentDark }}>📄 請款單</div>
           <button onClick={onClose} style={{ background: C.bgDeep, border: "none", width: 30, height: 30, borderRadius: "50%", cursor: "pointer", fontSize: 16, color: C.muted }}>×</button>
         </div>
 
-        {mode === "batch" && (
-          <div className="no-print" style={{ padding: "14px 20px", background: C.bgDeep, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>起</div>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}/>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>迄</div>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}/>
-            </div>
-            <div style={{ fontSize: 11, color: C.faint, alignSelf: "center" }}>留空 = 全部訂單</div>
-          </div>
-        )}
-
-        <div id="billing-print-area" style={{ padding: "28px 24px" }}>
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: C.accentDark }}>請款單</div>
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>開立日期:{today}</div>
-          </div>
-
-          <div style={{ marginBottom: 16, fontSize: 13, lineHeight: 1.8 }}>
-            <div><strong>客人:</strong> {displayName}</div>
-            {mode === "batch" && <div><strong>期間:</strong> {startDate || "最早"} ~ {endDate || "至今"}</div>}
-            {mode === "single" && <div><strong>訂單編號:</strong> #{order?.no}</div>}
-          </div>
-
-          {ordersToShow.map(o => {
-            const c = calcOrder(o);
-            return (
-              <div key={o.id} style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px dashed ${C.border}` }}>
-                {mode === "batch" && (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 6 }}>
-                    <span>#{o.no} · {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : ""}</span>
-                    <span>{ORDER_STATUS[o.status]?.label || o.status}</span>
-                  </div>
-                )}
-                {(o.items || []).map((it, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
-                    <span>{it.name} × {it.qty}</span>
-                    <span>{fmtMoney((it.price || 0) * (it.qty || 1))}</span>
-                  </div>
-                ))}
-                {c.shippingFee > 0 && (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, padding: "3px 0" }}>
-                    <span>運費</span><span>{fmtMoney(c.shippingFee)}</span>
-                  </div>
-                )}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginTop: 4 }}>
-                  <span>小計</span><span>{fmtMoney(c.grand)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.green, marginTop: 2 }}>
-                  <span>已付</span><span>{fmtMoney(c.paid)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: c.unpaid > 0 ? C.red : C.green }}>
-                  <span>未付</span><span>{fmtMoney(c.unpaid)}</span>
-                </div>
+        {/* 開單前的填寫欄位(不會印出) */}
+        <div className="no-print" style={{ padding: "14px 20px", background: C.bgDeep, display: "flex", flexDirection: "column", gap: 10 }}>
+          {mode === "batch" && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>起</div>
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                  style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}/>
               </div>
-            );
-          })}
-
-          {ordersToShow.length === 0 && (
-            <div style={{ textAlign: "center", padding: "30px 0", color: C.muted, fontSize: 13 }}>此區間沒有符合的訂單</div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>迄</div>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                  style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}/>
+              </div>
+              <div style={{ fontSize: 11, color: C.faint, alignSelf: "center" }}>留空 = 全部訂單</div>
+            </div>
           )}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>團名 / 批次名稱(選填)</div>
+              <input value={batchLabel} onChange={e => setBatchLabel(e.target.value)} placeholder="例如:韓國親飛"
+                style={{ width: "100%", padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}/>
+            </div>
+            <div style={{ width: 120 }}>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>附加費</div>
+              <input type="number" inputMode="numeric" value={extraFee} onChange={e => setExtraFee(e.target.value)} placeholder="0"
+                style={{ width: "100%", padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}/>
+            </div>
+          </div>
+        </div>
 
-          <div style={{ marginTop: 20, paddingTop: 14, borderTop: `2px solid ${C.accent}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
-              <span>應付總額</span><span style={{ fontWeight: 700 }}>{fmtMoney(grandTotal)}</span>
+        <div id="billing-print-area">
+          {/* 深色標題區 */}
+          <div style={{ background: C.accentDark, color: "#fff", padding: "22px 22px 18px" }}>
+            <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 8 }}>{shopName ? `${shopName} ` : ""}請款單</div>
+            <div style={{ fontSize: 12, opacity: .85, lineHeight: 1.7 }}>
+              {batchLabel ? `${batchLabel} | ` : ""}{periodText}
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.green, marginBottom: 4 }}>
-              <span>已付金額</span><span>{fmtMoney(grandPaid)}</span>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>
+              {codeLabel ? `[${codeLabel}] ` : ""}{displayName}
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 700, color: grandUnpaid > 0 ? C.red : C.green }}>
-              <span>尚欠金額</span><span>{fmtMoney(grandUnpaid)}</span>
+          </div>
+
+          <div style={{ padding: "20px 22px" }}>
+            {/* 每筆訂單明細 */}
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 10 }}>── 訂單明細 ──</div>
+            {ordersToShow.map(o => {
+              const c = calcOrder(o);
+              return (
+                <div key={o.id} style={{ marginBottom: 14, paddingBottom: 12, borderBottom: `1px dashed ${C.borderLight}` }}>
+                  {mode === "batch" && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 6 }}>
+                      <span>#{o.no} · {o.created_at ? new Date(o.created_at).toLocaleDateString("zh-TW") : ""}</span>
+                      <span>{ORDER_STATUS[o.status]?.label || o.status}</span>
+                    </div>
+                  )}
+                  {(o.items || []).map((it, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                      <span>{it.name} × {it.qty}</span>
+                      <span>{fmtMoney((it.price || 0) * (it.qty || 1))}</span>
+                    </div>
+                  ))}
+                  {c.shippingFee > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, padding: "3px 0" }}>
+                      <span>運費</span><span>{fmtMoney(c.shippingFee)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginTop: 4 }}>
+                    <span>小計</span><span>{fmtMoney(c.grand)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.green, marginTop: 2 }}>
+                    <span>已付</span><span>{fmtMoney(c.paid)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: c.unpaid > 0 ? C.red : C.green }}>
+                    <span>未付</span><span>{fmtMoney(c.unpaid)}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {ordersToShow.length === 0 && (
+              <div style={{ textAlign: "center", padding: "20px 0", color: C.muted, fontSize: 13 }}>此區間沒有符合的訂單</div>
+            )}
+
+            {/* 收款核對 */}
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: "18px 0 8px" }}>收款核對</div>
+            <Row label="商品總額" value={fmtMoney(itemsTotal)} />
+            <Row label="未購買金額" value={fmtMoney(unpurchasedAmt)} />
+            <Row label="已購買金額" value={fmtMoney(purchasedAmt)} />
+            <div style={{ borderTop: `1px solid ${C.borderLight}`, margin: "8px 0" }} />
+            <Row label="國際運費" value={fmtMoney(shippingFeeSum)} />
+            <Row label="附加費" value={fmtMoney(extraFeeNum)} />
+
+            <div style={{ background: C.bgDeep, borderRadius: 10, padding: "12px 14px", margin: "12px 0" }}>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>帳單總額</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.text, textAlign: "right" }}>{fmtMoney(billTotal)}</div>
             </div>
+
+            <Row label="累計已匯款" value={fmtMoney(paidAmt)} />
+
+            <div style={{ background: unpaid > 0 ? C.redBg : C.greenBg, borderRadius: 10, padding: "12px 14px", margin: "10px 0" }}>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>尚未匯款</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: unpaid > 0 ? C.red : C.green, textAlign: "right" }}>{fmtMoney(unpaid)}</div>
+            </div>
+
+            {bankInfo && (
+              <div style={{ fontSize: 13, color: C.textMid, marginTop: 14, lineHeight: 1.7 }}>
+                匯款帳號:{bankInfo}
+              </div>
+            )}
+            {noteText && (
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 10, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+                {noteText}
+              </div>
+            )}
           </div>
         </div>
 
@@ -6036,17 +6113,48 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout, data, setD
   const [autoCancelHours, setAutoCancelHours] = useState("36");
   const [cancelSaving, setCancelSaving] = useState(false);
 
+  // 請款單設定:店名、匯款帳戶資訊、備註文字
+  const [billingShopName, setBillingShopName] = useState("");
+  const [billingBankInfo, setBillingBankInfo] = useState("");
+  const [billingNote, setBillingNote] = useState("");
+  const [billingSaving, setBillingSaving] = useState(false);
+
   // 載入目前設定
   useEffect(() => {
     Promise.all([
       supabase.from("settings").select("*").eq("key", "shopee_ship_url").maybeSingle(),
       supabase.from("settings").select("*").eq("key", "auto_cancel_hours").maybeSingle(),
-    ]).then(([shopee, cancel]) => {
+      supabase.from("settings").select("*").eq("key", "billing_shop_name").maybeSingle(),
+      supabase.from("settings").select("*").eq("key", "billing_bank_info").maybeSingle(),
+      supabase.from("settings").select("*").eq("key", "billing_note").maybeSingle(),
+    ]).then(([shopee, cancel, shopName, bankInfo, note]) => {
       if (shopee.data?.value) setShopeeUrl(shopee.data.value);
       if (cancel.data?.value) setAutoCancelHours(cancel.data.value);
+      if (shopName.data?.value) setBillingShopName(shopName.data.value);
+      if (bankInfo.data?.value) setBillingBankInfo(bankInfo.data.value);
+      if (note.data?.value) setBillingNote(note.data.value);
       setShopeeLoading(false);
     }).catch(() => setShopeeLoading(false));
   }, []);
+
+  const saveBillingSettings = async () => {
+    setBillingSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("settings").upsert([
+        { key: "billing_shop_name", value: sanitize(billingShopName, 100), updated_at: now },
+        { key: "billing_bank_info", value: sanitize(billingBankInfo, 200), updated_at: now },
+        { key: "billing_note", value: sanitize(billingNote, 500), updated_at: now },
+      ], { onConflict: "key" });
+      if (error) throw error;
+      logAction("更新請款單設定", billingShopName);
+      toast("請款單設定已儲存 ✅");
+    } catch (e) {
+      console.error(e);
+      toast(`儲存失敗:${e.message || "未知錯誤"}`);
+    }
+    setBillingSaving(false);
+  };
 
   const saveAutoCancel = async () => {
     setCancelSaving(true);
@@ -6187,6 +6295,39 @@ function SettingsPage({ credentials, setCredentials, toast, onLogout, data, setD
           </div>
           <Btn onClick={saveAutoCancel} disabled={cancelSaving||shopeeLoading}>
             {cancelSaving ? "儲存中..." : "儲存時數"}
+          </Btn>
+        </div>
+      </Card>
+
+      {/* 📄 請款單設定 */}
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.accentDark, marginTop: 4 }}>📄 請款單設定</div>
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.7 }}>
+          設定一次,之後每張請款單(訂單頁 / 客人管理裡的「請款單」按鈕)都會自動帶入這些內容。
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display: "block", marginBottom: 6 }}>店名 / 代購名稱</label>
+            <input value={billingShopName} onChange={e => setBillingShopName(e.target.value)}
+              placeholder="例如:FUKUGI 代購" disabled={shopeeLoading}
+              style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing: "border-box" }} />
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>會顯示在請款單標題,例如「FUKUGI 代購請款單」</div>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display: "block", marginBottom: 6 }}>匯款帳戶資訊</label>
+            <input value={billingBankInfo} onChange={e => setBillingBankInfo(e.target.value)}
+              placeholder="例如:國泰 | 013 | 043700009565 | 呂宗倫" disabled={shopeeLoading}
+              style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", display: "block", marginBottom: 6 }}>請款單備註文字</label>
+            <textarea value={billingNote} onChange={e => setBillingNote(e.target.value)} rows={3}
+              placeholder={"產品會將再付款完畢後,抵台 1~3 個工作天內發貨。\n如有其他問題請在七日內提出。\n可以接受 LINE PAY"}
+              disabled={shopeeLoading}
+              style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 14, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
+          </div>
+          <Btn onClick={saveBillingSettings} disabled={billingSaving||shopeeLoading}>
+            {billingSaving ? "儲存中..." : "儲存請款單設定"}
           </Btn>
         </div>
       </Card>
