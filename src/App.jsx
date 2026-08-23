@@ -1515,7 +1515,7 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
   const doReassignTemp = async () => {
     const n = sanitize(tempName, 50);
     if (!n) { toast("請填寫客人姓名"); return; }
-    const tempId = `temp:${n}:${Date.now()}`;
+    const tempId = `temp:${n}`;
     setReassignSaving(true);
     const { error } = await supabase.from("orders").update({
       customer_line_id: tempId,
@@ -2060,7 +2060,7 @@ function AddOrderModal({ data, setData, onClose, toast }) {
   const useNewCustomer = () => {
     const n = sanitize(newCustomerName, 50);
     if (!n) { alert("請填寫客人姓名"); return; }
-    const tempId = `temp:${n}:${Date.now()}`;
+    const tempId = `temp:${n}`;
     const newTemp = { id: tempId, name: n, communityName: "", phone: "", isMember: false, source: "臨時客人" };
     setTempCustomers(prev => [...prev, newTemp]);
     setCustomerId(tempId);
