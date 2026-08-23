@@ -1487,6 +1487,48 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
   const displayLineName = memberInfo?.line_name || "";
   const [expanded, setExpanded] = useState(false);
   const [showBilling, setShowBilling] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [reassignSearch, setReassignSearch] = useState("");
+  const [reassignSaving, setReassignSaving] = useState(false);
+  const [showTempInput, setShowTempInput] = useState(false);
+  const [tempName, setTempName] = useState("");
+
+  const doReassign = async (newMember) => {
+    const newLineId = newMember.line_user_id;
+    const newName = newMember.community_name || newMember.line_name || newMember.name || "未命名";
+    if (newLineId === o.customer_line_id) { setShowReassign(false); return; }
+    setReassignSaving(true);
+    const { error } = await supabase.from("orders").update({
+      customer_line_id: newLineId,
+      customer_name: newName,
+      updated_at: new Date().toISOString(),
+    }).eq("id", o.id);
+    setReassignSaving(false);
+    if (error) { toast(`更改客人失敗:${error.message}`); return; }
+    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, customer_line_id: newLineId, customer_name: newName } : x) }));
+    logAction("更改訂單客人", `#${o.no} → ${newName}`);
+    toast(`✅ 已更改為「${newName}」`);
+    setShowReassign(false);
+    setReassignSearch("");
+  };
+
+  const doReassignTemp = async () => {
+    const n = sanitize(tempName, 50);
+    if (!n) { toast("請填寫客人姓名"); return; }
+    const tempId = `temp:${n}:${Date.now()}`;
+    setReassignSaving(true);
+    const { error } = await supabase.from("orders").update({
+      customer_line_id: tempId,
+      customer_name: n,
+      updated_at: new Date().toISOString(),
+    }).eq("id", o.id);
+    setReassignSaving(false);
+    if (error) { toast(`更改客人失敗:${error.message}`); return; }
+    setData(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, customer_line_id: tempId, customer_name: n } : x) }));
+    logAction("更改訂單客人(臨時客人)", `#${o.no} → ${n}`);
+    toast(`✅ 已更改為臨時客人「${n}」`);
+    setShowReassign(false); setShowTempInput(false); setTempName(""); setReassignSearch("");
+  };
 
   const cost = (o.items||[]).reduce((s,it)=>s+(it.cost||0)*(it.qty||1),0);
   const total = o.total || 0;
@@ -1590,9 +1632,19 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {[
                 { label:"訂單編號", value:`#${o.no}` },
-                { label:"客人", value: displayLineName && displayLineName !== displayName
-                    ? <span>{displayName} <span style={{ color:C.accent, fontSize:11 }}>@{displayLineName}</span></span>
-                    : displayName },
+                { label:"客人", value: (
+                    <span style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                      <span>
+                        {displayLineName && displayLineName !== displayName
+                          ? <>{displayName} <span style={{ color:C.accent, fontSize:11 }}>@{displayLineName}</span></>
+                          : displayName}
+                      </span>
+                      <button onClick={e=>{ e.stopPropagation(); setShowReassign(v=>!v); }}
+                        style={{ fontSize:9, background:"none", border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", cursor:"pointer", color:C.accent, fontWeight:600 }}>
+                        更改
+                      </button>
+                    </span>
+                  ) },
                 { label:"訂單狀態", value:<StatusBadge status={o.status}/> },
                 { label:"付款狀態", value:<span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:ps.bg, color:ps.color, fontWeight:600 }}>{ps.label}</span> },
                 { label:"總金額", value:fmtMoney(total+shippingFee), bold:true },
@@ -1606,6 +1658,67 @@ function OrderCard({ o, updateStatus, del, setData, toast, members = [] }) {
                 </div>
               ))}
             </div>
+
+            {/* 更改客人選擇面板 */}
+            {showReassign && (
+              <div onClick={e=>e.stopPropagation()} style={{ marginTop:10, padding:"10px 12px", background:C.surface, borderRadius:10, border:`1.5px solid ${C.accent}40` }}>
+                <div style={{ fontSize:11, color:C.accentDark, fontWeight:700, marginBottom:8 }}>⚠️ 更改此訂單綁定的客人(選一個既有會員)</div>
+                <input value={reassignSearch} onChange={e=>setReassignSearch(e.target.value)}
+                  placeholder="搜尋姓名/社群名稱/電話..."
+                  style={{ width:"100%", background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 10px", fontSize:12, boxSizing:"border-box", marginBottom:8 }}/>
+                <div style={{ maxHeight:180, overflowY:"auto", display:"flex", flexDirection:"column", gap:4 }}>
+                  {members
+                    .filter(m => {
+                      if (!reassignSearch.trim()) return true;
+                      const q = reassignSearch.trim().toLowerCase();
+                      return String(m.community_name||"").toLowerCase().includes(q)
+                        || String(m.line_name||"").toLowerCase().includes(q)
+                        || String(m.phone||"").toLowerCase().includes(q);
+                    })
+                    .slice(0, 30)
+                    .map(m => (
+                      <button key={m.line_user_id} disabled={reassignSaving} onClick={()=>doReassign(m)}
+                        style={{ textAlign:"left", background: m.line_user_id===o.customer_line_id ? C.accentBg : C.bgDeep, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 10px", cursor:reassignSaving?"wait":"pointer", fontSize:12 }}>
+                        <span style={{ fontWeight:600, color:C.text }}>{m.community_name || m.line_name || "未命名"}</span>
+                        {m.phone && <span style={{ color:C.muted, marginLeft:6 }}>{m.phone}</span>}
+                        {m.line_user_id===o.customer_line_id && <span style={{ color:C.accent, marginLeft:6, fontSize:10 }}>(目前)</span>}
+                      </button>
+                    ))}
+                  {members.length===0 && <div style={{ fontSize:11, color:C.muted, padding:"6px 0" }}>目前沒有會員資料可選</div>}
+                </div>
+
+                {/* 臨時客人輸入 */}
+                {!showTempInput ? (
+                  <button onClick={()=>setShowTempInput(true)}
+                    style={{ marginTop:8, width:"100%", background:C.bgDeep, border:`1px dashed ${C.borderDeep}`, borderRadius:8, padding:"7px", fontSize:12, color:C.textMid, cursor:"pointer" }}>
+                    + 新增臨時客人(不是會員的人)
+                  </button>
+                ) : (
+                  <div style={{ marginTop:8, padding:"8px 10px", background:C.bgDeep, borderRadius:8 }}>
+                    <input value={tempName} onChange={e=>setTempName(e.target.value)}
+                      placeholder="臨時客人姓名,例如:張小姐" autoFocus
+                      onKeyDown={e=>e.key==="Enter" && doReassignTemp()}
+                      style={{ width:"100%", background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 10px", fontSize:12, boxSizing:"border-box", marginBottom:6 }}/>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={doReassignTemp} disabled={reassignSaving}
+                        style={{ flex:1, background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"7px", fontSize:12, fontWeight:600, cursor:reassignSaving?"wait":"pointer" }}>
+                        使用此臨時客人
+                      </button>
+                      <button onClick={()=>{ setShowTempInput(false); setTempName(""); }}
+                        style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 12px", fontSize:12, color:C.muted, cursor:"pointer" }}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={()=>{ setShowReassign(false); setReassignSearch(""); setShowTempInput(false); setTempName(""); }}
+                  style={{ marginTop:8, width:"100%", background:"none", border:`1px solid ${C.border}`, borderRadius:8, padding:"6px", fontSize:11, color:C.muted, cursor:"pointer" }}>
+                  取消
+                </button>
+              </div>
+            )}
+
             {/* 狀態更改 */}
             <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8 }}>
               <span style={{ fontSize:11, color:C.muted }}>更改狀態：</span>
