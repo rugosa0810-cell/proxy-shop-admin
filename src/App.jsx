@@ -86,6 +86,21 @@ const today = () => new Date().toLocaleDateString("zh-TW");
 
 // 客人端 LIFF URL(全域)
 const CUSTOMER_LIFF_URL = "https://liff.line.me/2009872512-JJAaJ7Bi";
+// 客人端網站網址,用來呼叫「商品已買到」推播通知 API
+const CUSTOMER_SITE_URL = "https://proxy-shop-client.vercel.app";
+
+// 標記已採買後,通知客人(呼叫客人端專案的伺服器端 API,失敗不影響主流程)
+async function notifyPurchased(orderId) {
+  try {
+    await fetch(`${CUSTOMER_SITE_URL}/api/notify-purchased`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId }),
+    });
+  } catch (e) {
+    console.warn("通知客人「已買到」失敗:", e);
+  }
+}
 
 // INIT_DATA:僅供離線 fallback 用,實際資料由 Supabase 提供
 const INIT_DATA = {
@@ -3668,6 +3683,7 @@ function PurchasePage({ data, setData, toast, setTab }) {
         ...d,
         orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems } : x)
       }));
+      notifyPurchased(order.id);
     }
 
     logAction("採買品項", `${productName} · ${variantName} · ${purchasedItemCount} 件`);
@@ -3712,6 +3728,7 @@ function PurchasePage({ data, setData, toast, setTab }) {
         ...d,
         orders: d.orders.map(x => x.id === order.id ? { ...x, items: newItems } : x)
       }));
+      notifyPurchased(order.id);
     }
 
     logAction("批次採買品項", `${selected.size} 款 · ${purchasedItemCount} 件`);
@@ -5215,11 +5232,11 @@ function CustomersPage({ data, setData, toast, sendLineNotify }) {
       patch.wholesale_since = now;
     }
 
-    const { error } = await supabase.from("members").update(patch).eq("id", memberInfo.id);
+    const { error } = await supabase.from("members").update(patch).eq("line_user_id", memberInfo.line_user_id);
     if (error) { toast(`更新失敗:${error.message}`); return; }
     setData(d => ({
       ...d,
-      members: (d.members || []).map(m => m.id === memberInfo.id ? { ...m, ...patch } : m),
+      members: (d.members || []).map(m => m.line_user_id === memberInfo.line_user_id ? { ...m, ...patch } : m),
     }));
     logAction(newIsWholesale ? "設為批發客" : "取消批發客", `${customer.name} · ${newNo}`);
     toast(newIsWholesale ? `✅ 已設為批發客 · 編號 ${newNo}` : "已取消批發客身分");
